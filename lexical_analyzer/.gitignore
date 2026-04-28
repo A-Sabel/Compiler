@@ -1,0 +1,15 @@
+# Ignore Maven build output
+/target/
+
+# Ignore VS Code / IDE specific files
+/.settings/
+/.classpath
+/.project
+.vscode/
+
+# Ignore compiled bytecode
+*.class
+
+# Ignore temporary files
+*.log
+*.tmp

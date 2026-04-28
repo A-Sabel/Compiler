@@ -1,0 +1,20 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Run MainGUI",
+            "request": "launch",
+            "mainClass": "com.group3.compiler.frontend.MainGUI",
+            "projectName": "lexical_analyzer",
+            "cwd": "${workspaceFolder}/lexical_analyzer"
+        },
+        {
+            "type": "java",
+            "name": "Run MainGUI (Fallback)",
+            "request": "launch",
+            "mainClass": "com.group3.compiler.frontend.MainGUI",
+            "cwd": "${workspaceFolder}/lexical_analyzer"
+        }
+    ]
+}
