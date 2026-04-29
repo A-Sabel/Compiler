@@ -52,11 +52,11 @@ public class SemanticAnalyzer {
             case "RETURN":
                 validateReturnStatement(node);
                 break;
-            case "IF":
+            case "IF_STMT":
                 validateBooleanCondition(node);
                 analyzeChildren(node);
                 break;
-            case "WHILE":
+            case "WHILE_STMT":
             case "DO_WHILE":
                 loopDepth++;
                 validateBooleanCondition(node);

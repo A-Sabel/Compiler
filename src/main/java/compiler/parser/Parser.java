@@ -487,23 +487,35 @@ public class Parser {
     }
 
     private ASTNode parseVarDeclNoSemiCheck() {
-        Tokens t = current(); // Capture the start of the 'int' or 'String'
+        Tokens typeToken = current(); // 1. Capture the start token (e.g., 'int')
         String typeName = currentLexeme(); advance(); 
-        String varName  = currentLexeme(); advance(); 
 
-        // CRITICAL: You MUST pass t.getLine() and t.getColumn() to the factory!
-        ASTNode declNode = ASTNode.of("VAR_DECL", typeName + " " + varName, t.getLine(), t.getColumn());
-        
-        // Do the same for children nodes
-        declNode.addChild(ASTNode.of("TYPE", typeName, t.getLine(), t.getColumn()));
-        declNode.addChild(ASTNode.of("NAME", varName, t.getLine(), t.getColumn()));
+        // Parent node to house all variables in this declaration line
+        ASTNode groupNode = ASTNode.of("VAR_DECL_GROUP", typeToken.getLine(), typeToken.getColumn());
 
-        if (check("OPERATOR", "=")) {
-            advance(); 
-            ASTNode init = parseExpression();
-            declNode.addChild(wrapAs("INIT_VALUE", init));
-        }
-        return declNode;
+        do {
+            Tokens varToken = current(); // 2. Capture coordinates for THIS specific variable name
+            String varName = currentLexeme(); advance();
+
+            // Create a specific declaration node for this identifier
+            ASTNode declNode = ASTNode.of("VAR_DECL", typeName + " " + varName, varToken.getLine(), varToken.getColumn());
+            
+            // Attach the type and name children with precise coordinates
+            declNode.addChild(ASTNode.of("TYPE", typeName, typeToken.getLine(), typeToken.getColumn()));
+            declNode.addChild(ASTNode.of("NAME", varName, varToken.getLine(), varToken.getColumn()));
+
+            // Handle optional initialization for EACH variable (e.g., int x = 5, y = 10;)
+            if (check("OPERATOR", "=")) {
+                advance(); 
+                ASTNode init = parseExpression();
+                declNode.addChild(wrapAs("INIT_VALUE", init));
+            }
+            
+            groupNode.addChild(declNode);
+
+        } while (matchAndAdvance("PUNCTUATION", ",")); // 3. Continue if there is a comma
+
+        return groupNode;
     }
 
     // ═════════════════════════════════════════════════════════════════════════
