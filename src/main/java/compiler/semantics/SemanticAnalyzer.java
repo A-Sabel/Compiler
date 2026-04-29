@@ -87,6 +87,11 @@ public class SemanticAnalyzer {
                 analyzeChildren(node);
                 loopDepth--;
                 break;
+            case "PRINT_STMT":
+                if (!node.getChildren().isEmpty()) {
+                    inferExpressionType(node.getChildren().get(0)); 
+                }
+                break;
             default:
                 analyzeChildren(node);
                 break;

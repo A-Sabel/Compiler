@@ -463,18 +463,30 @@ public class Parser {
 
     // ── System.out.println(expr); ─────────────────────────────────────────────
     private ASTNode parsePrint() {
-        // Consume: System . out . println / print
-        advance(); // System
-        consume("PUNCTUATION", ".");
-        advance(); // out
-        consume("PUNCTUATION", ".");
-        String method = currentLexeme(); advance(); // println or print
+        Tokens t = current(); // 1. Capture the start token for coordinates
+        String method;
+
+        if (t.getLexeme().equals("System")) {
+            // Handle standard: System.out.println(...)
+            advance(); // System
+            consume("PUNCTUATION", ".");
+            advance(); // out
+            consume("PUNCTUATION", ".");
+            method = currentLexeme(); 
+            advance(); // println or print
+        } else {
+            // 2. Handle simplified: print(...) or println(...)
+            method = t.getLexeme();
+            advance();
+        }
+
         consume("SPECIAL_CHAR", "(");
         ASTNode arg = parseExpression();
         consume("SPECIAL_CHAR", ")");
         consumePunctuation(";");
 
-        ASTNode printNode = ASTNode.of("PRINT_STMT", method);
+        // 3. FIX: Pass the captured token's line and col to the factory
+        ASTNode printNode = ASTNode.of("PRINT_STMT", method, t.getLine(), t.getColumn());
         printNode.addChild(arg);
         return printNode;
     }
@@ -1006,13 +1018,23 @@ public class Parser {
     }
 
     private boolean isPrintStatement() {
+        // Heuristic: Check for standalone 'print', 'println', or 'printf'
+        Tokens t0 = peek(0);
+        if (t0 != null && (t0.getLexeme().equals("print") || 
+            t0.getLexeme().equals("println") || 
+            t0.getLexeme().equals("printf"))) {
+            return true;
+        }
+
         // Heuristic: IDENTIFIER "System" followed by "." "out" "." "println"/"print"
-        Tokens t0 = peek(0), t1 = peek(1), t2 = peek(2), t3 = peek(3), t4 = peek(4);
+        Tokens t1 = peek(1), t2 = peek(2), t3 = peek(3), t4 = peek(4);
+
         if (t0 == null || !t0.getLexeme().equals("System")) return false;
         if (t1 == null || !t1.getLexeme().equals("."))      return false;
         if (t2 == null || !t2.getLexeme().equals("out"))    return false;
         if (t3 == null || !t3.getLexeme().equals("."))      return false;
         if (t4 == null) return false;
+        
         return t4.getLexeme().equals("println") || t4.getLexeme().equals("print");
     }
 
