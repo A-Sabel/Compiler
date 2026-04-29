@@ -2,9 +2,9 @@ package compiler.parser;
 
 import java.util.List;
 
+import compiler.lexer.models.Tokens;
 import compiler.parser.ast.ASTNode;
 import compiler.util.ErrorHandler;
-import compiler.lexer.models.Tokens;
 
 /**
  * MAIN CLASS: Recursive Descent Parser
@@ -82,11 +82,23 @@ public class Parser {
         // while
         if (check("KEYWORD", "while")) return parseWhile();
 
+        // do-while
+        if (check("KEYWORD", "do")) return parseDoWhile();
+
         // for
         if (check("KEYWORD", "for")) return parseFor();
 
+        // break
+        if (check("KEYWORD", "break")) return parseBreak();
+
+        // continue
+        if (check("KEYWORD", "continue")) return parseContinue();
+
         // return
         if (check("KEYWORD", "return")) return parseReturn();
+
+        // switch
+        if (check("KEYWORD", "switch")) return parseSwitch();
 
         // System.out.println / System.out.print
         if (isPrintStatement()) return parsePrint();
@@ -148,6 +160,22 @@ public class Parser {
         return whileNode;
     }
 
+    // ── do-while ───────────────────────────────────────────────────────────────
+    private ASTNode parseDoWhile() {
+        consume("KEYWORD", "do");
+        ASTNode body = parseBlock();
+        consume("KEYWORD", "while");
+        consume("SPECIAL_CHAR", "(");
+        ASTNode condition = parseExpression();
+        consume("SPECIAL_CHAR", ")");
+        consumePunctuation(";");
+
+        ASTNode doWhileNode = ASTNode.of("DO_WHILE");
+        doWhileNode.addChild(wrapAs("BODY", body));
+        doWhileNode.addChild(wrapAs("CONDITION", condition));
+        return doWhileNode;
+    }
+
     // ── for ───────────────────────────────────────────────────────────────────
     private ASTNode parseFor() {
         consume("KEYWORD", "for");
@@ -189,6 +217,77 @@ public class Parser {
         }
         consumePunctuation(";");
         return returnNode;
+    }
+
+    // ── break ──────────────────────────────────────────────────────────────────
+    private ASTNode parseBreak() {
+        consume("KEYWORD", "break");
+        consumePunctuation(";");
+        return ASTNode.of("BREAK");
+    }
+
+    // ── continue ───────────────────────────────────────────────────────────────
+    private ASTNode parseContinue() {
+        consume("KEYWORD", "continue");
+        consumePunctuation(";");
+        return ASTNode.of("CONTINUE");
+    }
+
+    // ── switch ─────────────────────────────────────────────────────────────────
+    private ASTNode parseSwitch() {
+        consume("KEYWORD", "switch");
+        consume("SPECIAL_CHAR", "(");
+        ASTNode expr = parseExpression();
+        consume("SPECIAL_CHAR", ")");
+        consume("SPECIAL_CHAR", "{");
+
+        ASTNode switchNode = ASTNode.of("SWITCH");
+        switchNode.addChild(wrapAs("EXPR", expr));
+        
+        ASTNode casesWrapper = ASTNode.of("CASES");
+        
+        while (!isAtEnd() && !check("SPECIAL_CHAR", "}")) {
+            if (check("KEYWORD", "case")) {
+                advance(); // consume 'case'
+                ASTNode caseExpr = parseExpression();
+                consume("PUNCTUATION", ":");
+                
+                ASTNode caseNode = ASTNode.of("CASE");
+                caseNode.addChild(caseExpr);
+                
+                // Parse statements until next case/default/closing brace
+                ASTNode caseBody = ASTNode.of("CASE_BODY");
+                while (!isAtEnd() && !check("SPECIAL_CHAR", "}") && 
+                       !check("KEYWORD", "case") && !check("KEYWORD", "default")) {
+                    ASTNode stmt = parseStatement();
+                    if (stmt != null) caseBody.addChild(stmt);
+                }
+                caseNode.addChild(caseBody);
+                casesWrapper.addChild(caseNode);
+            } 
+            else if (check("KEYWORD", "default")) {
+                advance(); // consume 'default'
+                consume("PUNCTUATION", ":");
+                
+                ASTNode defaultNode = ASTNode.of("DEFAULT");
+                ASTNode defaultBody = ASTNode.of("CASE_BODY");
+                
+                while (!isAtEnd() && !check("SPECIAL_CHAR", "}")) {
+                    ASTNode stmt = parseStatement();
+                    if (stmt != null) defaultBody.addChild(stmt);
+                }
+                defaultNode.addChild(defaultBody);
+                casesWrapper.addChild(defaultNode);
+            }
+            else {
+                // Skip unexpected tokens in switch
+                advance();
+            }
+        }
+        
+        consume("SPECIAL_CHAR", "}");
+        switchNode.addChild(casesWrapper);
+        return switchNode;
     }
 
     // ── System.out.println(expr); ─────────────────────────────────────────────
@@ -237,7 +336,25 @@ public class Parser {
     // ═════════════════════════════════════════════════════════════════════════
 
     private ASTNode parseExpression() {
-        return parseAssignment();
+        return parseTernary();
+    }
+
+    private ASTNode parseTernary() {
+        ASTNode condition = parseAssignment();
+        
+        if (check("SPECIAL_CHAR", "?")) {
+            advance(); // consume '?'
+            ASTNode thenExpr = parseExpression();
+            consume("SPECIAL_CHAR", ":");
+            ASTNode elseExpr = parseExpression();
+            
+            ASTNode ternary = ASTNode.of("TERNARY", "?");
+            ternary.addChild(wrapAs("CONDITION", condition));
+            ternary.addChild(wrapAs("THEN", thenExpr));
+            ternary.addChild(wrapAs("ELSE", elseExpr));
+            return ternary;
+        }
+        return condition;
     }
 
     private ASTNode parseAssignment() {
@@ -332,9 +449,56 @@ public class Parser {
     }
 
     private ASTNode parseUnary() {
+        // Type cast: (Type) expr
+        if (check("SPECIAL_CHAR", "(")) {
+            int savePos = pos;
+            advance(); // consume '('
+            
+            // Try to parse as type
+            if (isTypeKeyword()) {
+                String type = currentLexeme();
+                advance();
+                if (check("SPECIAL_CHAR", ")")) {
+                    advance(); // consume ')'
+                    ASTNode castExpr = parseUnary();
+                    ASTNode castNode = ASTNode.of("CAST", type);
+                    castNode.addChild(castExpr);
+                    return castNode;
+                }
+            }
+            
+            // Not a cast, restore position and parse as normal expression
+            pos = savePos;
+        }
+        
+        // new operator: new ClassName(...)
+        if (check("KEYWORD", "new")) {
+            advance(); // consume 'new'
+            String className = currentLexeme();
+            advance(); // consume class name (must be identifier)
+            
+            ASTNode newNode = ASTNode.of("NEW", className);
+            
+            // Optional constructor arguments
+            if (check("SPECIAL_CHAR", "(")) {
+                advance();
+                ASTNode args = ASTNode.of("ARGS");
+                while (!isAtEnd() && !check("SPECIAL_CHAR", ")")) {
+                    args.addChild(parseExpression());
+                    if (check("PUNCTUATION", ",")) advance();
+                }
+                consume("SPECIAL_CHAR", ")");
+                newNode.addChild(args);
+            }
+            
+            return newNode;
+        }
+        
+        // Unary operators: !, -, ++, --
         if (currentType() != null && currentType().equals("OPERATOR")
             && (currentLexeme().equals("!") || currentLexeme().equals("-")
-                || currentLexeme().equals("++") || currentLexeme().equals("--"))) {
+                || currentLexeme().equals("++") || currentLexeme().equals("--")
+                || currentLexeme().equals("~"))) {
             String op = currentLexeme(); advance();
             ASTNode node = ASTNode.of("UNARY_OP", op);
             node.addChild(parseUnary());
@@ -346,13 +510,59 @@ public class Parser {
     
     private ASTNode parsePostfix() {
         ASTNode node = parsePrimary();
-        if (currentType() != null && currentType().equals("OPERATOR")
-            && (currentLexeme().equals("++") || currentLexeme().equals("--"))) {
-            String op = currentLexeme(); advance();
-            ASTNode postfix = ASTNode.of("POSTFIX_OP", op);
-            postfix.addChild(node);
-            return postfix;
+        
+        // Handle postfix operators and access operations (loops to handle chaining: arr[i][j], obj.method().arr[i], etc.)
+        while (true) {
+            // Postfix ++ and --
+            if (currentType() != null && currentType().equals("OPERATOR")
+                && (currentLexeme().equals("++") || currentLexeme().equals("--"))) {
+                String op = currentLexeme(); advance();
+                ASTNode postfix = ASTNode.of("POSTFIX_OP", op);
+                postfix.addChild(node);
+                node = postfix;
+            }
+            // Array access: [expr]
+            else if (check("SPECIAL_CHAR", "[")) {
+                advance(); // consume '['
+                ASTNode index = parseExpression();
+                consume("SPECIAL_CHAR", "]");
+                ASTNode access = ASTNode.of("ARRAY_ACCESS");
+                access.addChild(node);
+                access.addChild(index);
+                node = access;
+            }
+            // Member access: .member or .method()
+            else if (check("PUNCTUATION", ".")) {
+                advance(); // consume '.'
+                String member = currentLexeme();
+                advance(); // consume member name
+                
+                // Check if it's a method call
+                if (check("SPECIAL_CHAR", "(")) {
+                    advance(); // consume '('
+                    ASTNode methodCall = ASTNode.of("METHOD_CALL", member);
+                    methodCall.addChild(node); // Add the object/instance
+                    
+                    ASTNode args = ASTNode.of("ARGS");
+                    while (!isAtEnd() && !check("SPECIAL_CHAR", ")")) {
+                        args.addChild(parseExpression());
+                        if (check("PUNCTUATION", ",")) advance();
+                    }
+                    consume("SPECIAL_CHAR", ")");
+                    methodCall.addChild(args);
+                    node = methodCall;
+                } else {
+                    // Member field access
+                    ASTNode fieldAccess = ASTNode.of("FIELD_ACCESS", member);
+                    fieldAccess.addChild(node);
+                    node = fieldAccess;
+                }
+            }
+            else {
+                break;
+            }
         }
+        
         return node;
     }
 
@@ -452,6 +662,32 @@ public class Parser {
         int col  = t != null ? t.getColumn() : -1;
         ErrorHandler.report(
             "Expected '" + lexeme + "' but found '" + currentLexeme() + "'", line, col);
+        
+        // Error recovery: skip to next safe token
+        recover();
+    }
+    
+    /**
+     * Panic mode recovery: skip tokens until reaching a synchronization point.
+     * Safe synchronization points: semicolon, closing brace, closing paren.
+     */
+    private void recover() {
+        while (!isAtEnd()) {
+            // Synchronization points where parsing can resume
+            if (check("PUNCTUATION", ";")) {
+                advance();
+                return;
+            }
+            if (check("SPECIAL_CHAR", "}") || check("SPECIAL_CHAR", ")")) {
+                return; // Don't consume; let parent context handle it
+            }
+            if (check("SPECIAL_CHAR", "{")) {
+                return; // Let parent handle block
+            }
+            
+            // Skip this token and continue
+            advance();
+        }
     }
 
     private void consumePunctuation(String lexeme) {

@@ -3,9 +3,9 @@ package compiler.lexer;
 import java.util.ArrayList;
 import java.util.List;
 
+import compiler.lexer.models.Tokens;
 import compiler.util.CharMatcher;
 import compiler.util.ErrorHandler;
-import compiler.lexer.models.Tokens;
 
     /* MAIN CLASS: Lexical Analyzer
     Description: The engine that scans source code character-by-character to generate tokens.
@@ -130,6 +130,13 @@ import compiler.lexer.models.Tokens;
             return sourceCode.charAt(pos + 1);
         }
 
+        // Peek at character at offset (pos + offset)
+        private char peek(int offset) {
+            int target = pos + offset;
+            if (target >= sourceCode.length()) return '\0';
+            return sourceCode.charAt(target);
+        }
+
         private void processAlpha() {
             StringBuilder sb = new StringBuilder();
             int startCol = col;
@@ -148,50 +155,158 @@ import compiler.lexer.models.Tokens;
         private void processNumeric() {
             StringBuilder sb = new StringBuilder();
             int startCol = col;
+            
+            // Check for hex (0x), octal (0), or binary (0b) prefix
+            if (sourceCode.charAt(pos) == '0') {
+                sb.append('0');
+                advance();
+                
+                if (pos < sourceCode.length()) {
+                    char prefix = sourceCode.charAt(pos);
+                    
+                    // Hexadecimal (0x or 0X)
+                    if (prefix == 'x' || prefix == 'X') {
+                        sb.append(prefix);
+                        advance();
+                        boolean hasDigits = false;
+                        while (pos < sourceCode.length() && isHexDigit(sourceCode.charAt(pos))) {
+                            sb.append(sourceCode.charAt(pos));
+                            advance();
+                            hasDigits = true;
+                        }
+                        if (!hasDigits) {
+                            ErrorHandler.report("Invalid hex literal: no digits after 0x", line, startCol);
+                        }
+                        tokens.add(Tokenfactory.createToken(sb.toString(), "CONSTANT", line, startCol));
+                        return;
+                    }
+                    
+                    // Binary (0b or 0B)
+                    if (prefix == 'b' || prefix == 'B') {
+                        sb.append(prefix);
+                        advance();
+                        boolean hasDigits = false;
+                        while (pos < sourceCode.length() && (sourceCode.charAt(pos) == '0' || sourceCode.charAt(pos) == '1')) {
+                            sb.append(sourceCode.charAt(pos));
+                            advance();
+                            hasDigits = true;
+                        }
+                        if (!hasDigits) {
+                            ErrorHandler.report("Invalid binary literal: no digits after 0b", line, startCol);
+                        }
+                        tokens.add(Tokenfactory.createToken(sb.toString(), "CONSTANT", line, startCol));
+                        return;
+                    }
+                    
+                    // Octal (0-7 prefix, but NOT 0. for float)
+                    if (CharMatcher.isDigit(prefix) && prefix != '8' && prefix != '9') {
+                        // This is an octal number (old Java style: 0123)
+                        while (pos < sourceCode.length()) {
+                            char c = sourceCode.charAt(pos);
+                            if (c >= '0' && c <= '7') {
+                                sb.append(c);
+                                advance();
+                            } else if (c == '8' || c == '9') {
+                                ErrorHandler.report("Invalid octal literal: digit " + c + " is not allowed in octal", line, startCol);
+                                advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        tokens.add(Tokenfactory.createToken(sb.toString(), "CONSTANT", line, startCol));
+                        return;
+                    }
+                    // Otherwise continue to decimal/float processing (handles 0.5, 0e10, etc.)
+                }
+            }
+            
+            // Standard decimal number processing
             boolean hasDecimal = false;
+            boolean hasExponent = false;
+            
+            // Consume rest of integer part
             while (pos < sourceCode.length()) {
                 char c = sourceCode.charAt(pos);
                 if (CharMatcher.isDigit(c)) {
                     sb.append(c);
                     advance();
                 } 
-                // Only accept a dot IF we haven't seen one yet AND the next char is a digit
-                else if (c == '.' && !hasDecimal && CharMatcher.isDigit(peek())) {
+                // Decimal point
+                else if (c == '.' && !hasDecimal && !hasExponent && CharMatcher.isDigit(peek())) {
                     hasDecimal = true;
                     sb.append(c);
                     advance();
                 } 
-                // If it's a second dot, or a dot not followed by a digit, stop collecting.
+                // Exponent notation (e or E)
+                else if ((c == 'e' || c == 'E') && !hasExponent && sb.length() > 0) {
+                    hasExponent = true;
+                    sb.append(c);
+                    advance();
+                    
+                    // Optional sign after exponent
+                    char next = peek();
+                    if (next == '+' || next == '-') {
+                        sb.append(next);
+                        advance();
+                    }
+                    
+                    // At least one digit must follow exponent
+                    if (pos >= sourceCode.length() || !CharMatcher.isDigit(sourceCode.charAt(pos))) {
+                        ErrorHandler.report("Invalid number format: exponent requires at least one digit", line, startCol);
+                        break;
+                    }
+                } 
                 else {
                     break; 
                 }
             }
             tokens.add(Tokenfactory.createToken(sb.toString(), "CONSTANT", line, startCol));
         }
+        
+        private boolean isHexDigit(char c) {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        }
 
         private void processOperator() {
             int startCol = col;
             char current = sourceCode.charAt(pos);
             char next = peek();
+            char next2 = peek(2);
             String lexeme = Character.toString(current);
-            // State 11:
-            if (
+            
+            // Check for 3-character operators first
+            String threeChar = "" + current + next + next2;
+            if (threeChar.equals(">>>") || threeChar.equals(">>=") || threeChar.equals("<<=") || threeChar.equals(">>>")) {
+                lexeme = threeChar;
+                advance();
+                advance();
+                advance();
+            }
+            // Check for 2-character operators
+            else if (
                 (current == '=' && next == '=') ||
                 (current == '!' && next == '=') ||
                 (current == '<' && (next == '=' || next == '<')) ||
                 (current == '>' && (next == '=' || next == '>')) ||
                 (current == '+' && (next == '+' || next == '=')) ||
                 (current == '-' && (next == '-' || next == '=')) ||
-                (current == '&' && next == '&') ||
-                (current == '|' && next == '|') ||
+                (current == '&' && (next == '&' || next == '=')) ||
+                (current == '|' && (next == '|' || next == '=')) ||
+                (current == '^' && next == '=') ||
+                (current == '%' && next == '=') ||
                 (current == '*' && next == '=') ||
                 (current == '/' && next == '=') ||
                 (current == ':' && next == ':') // Method Reference
             ) {
-                lexeme += next; // Combine them (e.g., "+" + "+" = "++")
+                lexeme += next;
+                advance();
                 advance();
             }
-            advance();
+            // Single character operators (including ~, %, ^, &, |)
+            else {
+                advance();
+            }
+            
             tokens.add(Tokenfactory.createToken(lexeme, "OPERATOR", line, startCol));
         }
 
@@ -220,23 +335,51 @@ import compiler.lexer.models.Tokens;
             int startCol = col;
             int startLine = line;
             char quoteType = sourceCode.charAt(pos); // Stores either " or '
+            String literalType = quoteType == '"' ? "STRING" : "CHAR";
             StringBuilder sb = new StringBuilder();
             sb.append(quoteType);
             advance();
             boolean isClosed = false;
+            
             // Loop until we find the closing quote or hit the end of the file
             while (pos < sourceCode.length()) {
                 char current = sourceCode.charAt(pos);
+                
+                // Newline in literal is an error (Java doesn't allow multiline strings without escape)
+                if (current == '\n') {
+                    ErrorHandler.report("Unterminated " + literalType.toLowerCase() + " literal (newline encountered)", startLine, startCol);
+                    line++;
+                    col = 1;
+                    pos++;
+                    return; // Don't add token
+                }
+                
                 // State 9: Escape Sequence Trigger
                 if (current == '\\') {
                     sb.append(current);
                     advance();
                     if (pos < sourceCode.length()) {
-                        sb.append(sourceCode.charAt(pos));
-                        advance();
+                        char escaped = sourceCode.charAt(pos);
+                        
+                        // Validate escape sequence
+                        if (!isValidEscapeSequence(escaped)) {
+                            ErrorHandler.report("Invalid escape sequence: \\" + escaped, line, col);
+                        }
+                        
+                        sb.append(escaped);
+                        if (escaped == '\n') {
+                            line++;
+                            col = 1;
+                        } else {
+                            col++;
+                        }
+                        pos++;
+                    } else {
+                        ErrorHandler.report("Incomplete escape sequence at end of input", line, col);
                     }
                     continue;
                 }
+                
                 // State 8: Normal String Character
                 sb.append(current);
                 advance();
@@ -244,14 +387,36 @@ import compiler.lexer.models.Tokens;
                     isClosed = true;
                     break;
                 }
-                if (current == '\n') {
-                    break; 
-                }
             }
-            // Error Handling for Unterminated Strings
+            
+            // Error Handling for Unterminated Strings (reached EOF)
             if (!isClosed) {
-                ErrorHandler.report("Unterminated string or character literal", startLine, startCol);
+                ErrorHandler.report("Unterminated " + literalType.toLowerCase() + " literal (reached end of file)", startLine, startCol);
+                return; // Don't add malformed token
             }
+            
+            // Only add token if properly closed
             tokens.add(Tokenfactory.createToken(sb.toString(), "LITERAL", startLine, startCol));
+        }
+
+        private boolean isValidEscapeSequence(char escaped) {
+            // Java valid escape sequences
+            switch (escaped) {
+                case 'b':  // Backspace
+                case 't':  // Tab
+                case 'n':  // Newline
+                case 'f':  // Form feed
+                case 'r':  // Carriage return
+                case '\"': // Double quote
+                case '\'': // Single quote
+                case '\\': // Backslash
+                    return true;
+                default:
+                    // Octal escape: \0-\7 (single digit), \00-\77 (two digits), \000-\377 (three digits)
+                    if (escaped >= '0' && escaped <= '7') {
+                        return true;
+                    }
+                    return false;
+            }
         }
     }

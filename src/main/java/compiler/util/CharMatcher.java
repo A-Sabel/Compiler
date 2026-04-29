@@ -8,7 +8,7 @@ Member Note: "Since we aren't using Regex API, all 'scratch' logic for character
     validation goes here." */
 
 public class CharMatcher {
-    private static final Set<Character> OPERATORS = Set.of('+', '-', '*', '/', '%', '=', '&', '|', '!', '<', '>', ':', '?');
+    private static final Set<Character> OPERATORS = Set.of('+', '-', '*', '/', '%', '=', '&', '|', '!', '<', '>', ':', '?', '^', '~');
     private static final Set<Character> SPECIAL_SYMBOLS = Set.of('(', ')', '{', '}', '[', ']', '@');
 
     public static boolean isAlpha(char c) {
