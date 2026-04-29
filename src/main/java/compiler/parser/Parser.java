@@ -521,8 +521,19 @@ public class Parser {
     }
 
     private ASTNode parseVarDeclNoSemiCheck() {
-        Tokens typeToken = current(); // 1. Capture the start token (e.g., 'int')
-        String typeName = currentLexeme(); advance(); 
+        Tokens typeToken = current(); // 1. Capture the start token (e.g., 'int' or 'String')
+        StringBuilder fullType = new StringBuilder(currentLexeme()); 
+        advance(); 
+
+        // Support for array brackets (e.g., String[])
+        if (check("SPECIAL_CHAR", "[")) {
+            fullType.append(currentLexeme()); advance(); // Consume '['
+            if (check("SPECIAL_CHAR", "]")) {
+                fullType.append(currentLexeme()); advance(); // Consume ']'
+            }
+        }
+        
+        String typeName = fullType.toString();
 
         // Parent node to house all variables in this declaration line
         ASTNode groupNode = ASTNode.of("VAR_DECL_GROUP", typeToken.getLine(), typeToken.getColumn());
@@ -793,6 +804,18 @@ public class Parser {
                     fieldAccess.addChild(node);
                     node = fieldAccess;
                 }
+            }
+            else if (check("SPECIAL_CHAR", "[")) {
+                Tokens openBracket = current(); // Capture the '[' token
+                advance(); 
+                ASTNode index = parseExpression();
+                consume("SPECIAL_CHAR", "]");
+                
+                // Pass the coordinates to the node
+                ASTNode access = ASTNode.of("ARRAY_ACCESS", "", openBracket.getLine(), openBracket.getColumn());
+                access.addChild(node);
+                access.addChild(index);
+                node = access;
             }
             else {
                 break;
