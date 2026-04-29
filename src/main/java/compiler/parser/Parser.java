@@ -240,7 +240,8 @@ public class Parser {
         // Expression statement
         ASTNode expr = parseExpression();
         consumePunctuation(";");
-        ASTNode stmt = ASTNode.of("EXPR_STMT");
+        // Use expression's coordinates (expr has them from parseExpression)
+        ASTNode stmt = ASTNode.of("EXPR_STMT", "", expr.getLine(), expr.getColumn());
         stmt.addChild(expr);
         return stmt;
     }
@@ -389,16 +390,18 @@ public class Parser {
 
     // ── break ──────────────────────────────────────────────────────────────────
     private ASTNode parseBreak() {
+        Tokens t = current(); // Capture 'break' keyword coordinates
         consume("KEYWORD", "break");
         consumePunctuation(";");
-        return ASTNode.of("BREAK");
+        return ASTNode.of("BREAK", "", t.getLine(), t.getColumn());
     }
 
     // ── continue ───────────────────────────────────────────────────────────────
     private ASTNode parseContinue() {
+        Tokens t = current(); // Capture 'continue' keyword coordinates
         consume("KEYWORD", "continue");
         consumePunctuation(";");
-        return ASTNode.of("CONTINUE");
+        return ASTNode.of("CONTINUE", "", t.getLine(), t.getColumn());
     }
 
     // ── switch ─────────────────────────────────────────────────────────────────
@@ -516,13 +519,18 @@ public class Parser {
         ASTNode left = parseTernary(); // CHANGED: Now calls ternary instead of logicalOr
 
         if (currentType() != null && currentType().equals("OPERATOR") && isAssignmentOp(currentLexeme())) {
-            Tokens t = current(); // Grab '=' for coordinates!
+            Tokens opToken = current(); // Grab '=' coordinates
             String op = currentLexeme(); 
             advance();
             ASTNode right = parseAssignment();
             
-            // FIX: Pass coordinates (t.getLine, t.getCol) to the ASSIGN node
-            ASTNode assign = ASTNode.of("ASSIGN", op, t.getLine(), t.getColumn());
+            // Capture the LHS coordinates (variable name) for better error reporting
+            Tokens lhsToken = (left.getType().equals("IDENTIFIER") && left.getLine() > 0) ? 
+                                null : opToken; // Use left's own coords if available, else operator coords
+            int line = (left.getLine() > 0) ? left.getLine() : opToken.getLine();
+            int col = (left.getColumn() > 0) ? left.getColumn() : opToken.getColumn();
+            
+            ASTNode assign = ASTNode.of("ASSIGN", op, line, col);
             assign.addChild(left);
             assign.addChild(right);
             return assign;
@@ -605,9 +613,10 @@ public class Parser {
         ASTNode left = parseMultiplicative();
         while (currentType() != null && currentType().equals("OPERATOR")
                && (currentLexeme().equals("+") || currentLexeme().equals("-"))) {
+            Tokens t = current(); // Capture operator coordinates
             String op = currentLexeme(); advance();
             ASTNode right = parseMultiplicative();
-            ASTNode node = ASTNode.of("BINARY_OP", op);
+            ASTNode node = ASTNode.of("BINARY_OP", op, t.getLine(), t.getColumn());
             node.addChild(left); node.addChild(right);
             left = node;
         }

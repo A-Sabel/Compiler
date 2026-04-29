@@ -109,3 +109,132 @@ void levelFive() {
     
     int zombie = 100; // ERROR: Unreachable statement
 }
+
+
+---------------------------------------------------------------------
+// --- Billiards Rental Management Simulation ---
+
+int getTableRate(int tableType) {
+    // 1 for Standard, 2 for VIP
+    if (tableType == 2) {
+        return 100;
+    }
+    return 50;
+}
+
+double calculateTotal(int hours, int rate, boolean isVIPMember) {
+    int subtotal = hours * rate;
+    double discount = 0.0;
+    
+    // Test logical operators and control flow
+    if (isVIPMember && hours >= 3) {
+        discount = subtotal * 0.15; 
+    } else if (isVIPMember) {
+        discount = subtotal * 0.05;
+    }
+    
+    // Test mixed arithmetic promotion (int - double)
+    return subtotal - discount;
+}
+
+boolean checkAvailability(int tablesInUse, int totalTables) {
+    return tablesInUse < totalTables;
+}
+
+void processRental() {
+    String customerName = "Sunless";
+    int totalTables = 10;
+    int currentlyUsed = 8;
+    
+    // Test method call resolution
+    boolean canRent = checkAvailability(currentlyUsed, totalTables);
+    
+    if (canRent) {
+        currentlyUsed = currentlyUsed + 1;
+        int hoursPlayed = 4;
+        int tableType = 2; 
+        boolean isMember = true;
+        
+        int rate = getTableRate(tableType);
+        double finalBill = calculateTotal(hoursPlayed, rate, isMember);
+        
+        // Test loop scope isolation
+        int totalPoints = 0;
+        for (int frame = 1; frame <= 5; frame = frame + 1) {
+            int frameScore = frame * 10; 
+            totalPoints = totalPoints + frameScore;
+        }
+        
+        // Test ternary operator type safety
+        String performance = (totalPoints > 100) ? "Excellent" : "Average";
+        
+    } else {
+        String status = "Facility Full. Please wait.";
+    }
+    
+    // Scope verification: 'totalTables' and 'currentlyUsed' are still alive here, 
+    // but variables like 'rate', 'frame', or 'status' would fail if called.
+    int remaining = totalTables - currentlyUsed;
+}
+
+void main() {
+    processRental();
+}
+
+-----------------------------------------------------------------------------------
+// --- THE "STRATEGIC MENTOR" GRAND GAUNTLET ---
+// Theme: Enrollment Routing System (ERS)
+
+int calculateFee(int units, double rate) {
+    if (units < 0) {
+        return 0.0; // ERROR 1: Incompatible return type. Expected 'int' but got 'double'.
+    }
+    return units * 500; // PASS: valid return
+}
+
+boolean verifyStatus(int studentId, String status) {
+    return (studentId > 0) && (status != "Dropped"); // PASS: Logic and Equality
+}
+
+void runEnrollment() {
+    int maxCapacity = 40;
+    String courseCode = "CS2D";
+    
+    // 1. Complex Method Calls & Arguments
+    int fee = calculateFee(21, 1.5);        // PASS: 21 is int, 1.5 is double.
+    int badFee = calculateFee("21", 1.5);   // ERROR 2: Argument 1 of 'calculateFee' expects int but got String
+    
+    // 2. Deep Nested Scopes & Shadowing
+    if (maxCapacity >= 40) {
+        double maxCapacity = 50.0;          // ERROR 3: Variable 'maxCapacity' is already defined in this scope
+        int currentLoad = 35;
+        
+        for (int i = 0; i < 5; i = i + 1) {
+            int currentLoad = 40;           // ERROR 4: Variable 'currentLoad' is already defined in this scope
+            int cycle = i * 2; 
+        }
+        cycle = 10;                         // ERROR 5: Variable 'cycle' used in assignment before declaration
+    }
+    
+    // 3. Complex Arithmetic & The Sentinel
+    double ratio = maxCapacity / 0.0;       // ERROR 6: Arithmetic Exception: / by zero
+    int score = maxCapacity * courseCode;   // ERROR 7: Operator '*' cannot be applied to 'int' and 'String'
+    
+    // Sentinel check: This should ONLY complain about the math, NOT the assignment mismatch.
+    int cascadeTest = maxCapacity - courseCode; // ERROR 8: Operator '-' cannot be applied to 'int' and 'String'
+    
+    // 4. Ternary Madness
+    String level = (maxCapacity > 30) ? "Full" : 0; // ERROR 9: Incompatible ternary branches ('String' and 'int')
+    
+    // 5. Unreachable code deep inside a loop
+    while (maxCapacity > 0) {
+        maxCapacity = maxCapacity - 1;
+        break;
+        maxCapacity = 100;                  // ERROR 10: Unreachable statement
+    }
+}
+
+void main() {
+    runEnrollment();
+    verifyStatus(101, "Regular", true);     // ERROR 11: Method 'verifyStatus' expects 2 argument(s), but got 3
+}

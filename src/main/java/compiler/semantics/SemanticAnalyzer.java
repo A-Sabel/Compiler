@@ -113,7 +113,7 @@ public class SemanticAnalyzer {
         String name = nameNode.getValue();
 
         // 2. Duplicate Definition Check
-        if (symbolTable.isDefinedInCurrentScope(name)) {
+        if (symbolTable.lookupVariableType(name) != null) {
             ErrorHandler.report("Semantic Error: Variable '" + name + "' is already defined in this scope.", 
                                 nameNode.getLine(), nameNode.getColumn());
             return;
@@ -425,7 +425,8 @@ public class SemanticAnalyzer {
                 String declaredType = symbolTable.lookupVariableType(name);
                 if (declaredType == null) {
                     ErrorHandler.report(
-                        "Semantic Error: Identifier '" + name + "' used before declaration.", -1, -1);
+                        "Semantic Error: Identifier '" + name + "' used before declaration.", 
+                        expr.getLine(), expr.getColumn());
                     return "unknown";
                 }
                 return declaredType;
