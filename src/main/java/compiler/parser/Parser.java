@@ -59,19 +59,16 @@ public class Parser {
     public ASTNode parse() {
         ASTNode program = ASTNode.of("PROGRAM");
         while (!isAtEnd()) {
-            // Logic: If it starts with a modifier or type, check if it looks like a method:
-            // Type Name ( ... OR Modifier Type Name ( ...
-            boolean isMethod = false;
-            if (isModifier()) {
-                if (peekIsType() && checkPeek(2, "IDENTIFIER", null) && checkPeek(3, "SPECIAL_CHAR", "(")) isMethod = true;
-                else if (peekIsModifier()) isMethod = true; // Handles multiple modifiers
-            } else if (isTypeKeyword()) {
-                if (peekIsIdentifier() && checkPeek(2, "SPECIAL_CHAR", "(")) isMethod = true;
-            }
-
-            if (isMethod) {
+            // 1. Check for Class Declaration (e.g., public class Main)
+            if (check("KEYWORD", "class") || (isModifier() && peekIsClass())) {
+                program.addChild(parseClassDecl());
+            } 
+            // 2. Check for Method Declaration (using our new helper)
+            else if (isMethodStart()) {
                 program.addChild(parseMethodDecl());
-            } else {
+            } 
+            // 3. Fallback to standalone statements (like print or assignments)
+            else {
                 ASTNode stmt = parseStatement();
                 if (stmt != null) program.addChild(stmt);
             }
@@ -84,12 +81,13 @@ public class Parser {
         // 1. Parse Modifiers (Optional)
         ASTNode modifiersNode = ASTNode.of("MODIFIERS");
         while (check("KEYWORD", "public") || check("KEYWORD", "private") || 
-               check("KEYWORD", "protected") || check("KEYWORD", "static")) {
+            check("KEYWORD", "protected") || check("KEYWORD", "static")) {
             modifiersNode.addChild(ASTNode.of(currentLexeme()));
             advance();
         }
 
         // 2. Parse Return Type and Name
+        // Note: If return types can also be arrays, apply the same bracket logic here
         String returnType = currentLexeme(); advance(); 
         String methodName = currentLexeme(); advance(); 
 
@@ -107,14 +105,32 @@ public class Parser {
         // 3. Parse Parameters
         if (!check("SPECIAL_CHAR", ")")) {
             do {
-                if ((isTypeKeyword() || "IDENTIFIER".equals(currentType())) && peekIsIdentifier()) {
-                    String paramType = currentLexeme(); advance();
-                    String paramName = currentLexeme(); advance();
-                    
-                    ASTNode param = ASTNode.of("PARAM");
-                    param.addChild(ASTNode.of("TYPE", paramType));
-                    param.addChild(ASTNode.of("NAME", paramName));
-                    paramsNode.addChild(param);
+                if (isTypeKeyword() || "IDENTIFIER".equals(currentType())) {
+                    // --- THE FIX: Array Support for Parameters ---
+                    StringBuilder fullType = new StringBuilder(currentLexeme());
+                    advance(); // Consume base type (e.g., "String")
+
+                    // If brackets follow the type, consume them to form the full type name
+                    if (check("SPECIAL_CHAR", "[")) {
+                        fullType.append(currentLexeme()); advance(); // Consume "["
+                        if (check("SPECIAL_CHAR", "]")) {
+                            fullType.append(currentLexeme()); advance(); // Consume "]"
+                        }
+                    }
+
+                    // Now the next token must be the identifier (name)
+                    if ("IDENTIFIER".equals(currentType())) {
+                        String paramName = currentLexeme(); advance();
+                        
+                        ASTNode param = ASTNode.of("PARAM");
+                        param.addChild(ASTNode.of("TYPE", fullType.toString()));
+                        param.addChild(ASTNode.of("NAME", paramName));
+                        paramsNode.addChild(param);
+                    } else {
+                        ErrorHandler.report("Expected parameter name after type", tokens.get(pos).getLine(), tokens.get(pos).getColumn());
+                        recover();
+                        break;
+                    }
                 } else {
                     ErrorHandler.report("Expected parameter declaration (Type Identifier)", tokens.get(pos).getLine(), tokens.get(pos).getColumn());
                     recover();
@@ -165,6 +181,12 @@ public class Parser {
         if (t == null || !"KEYWORD".equals(t.getType())) return false;
         String lex = t.getLexeme();
         return lex.equals("public") || lex.equals("private") || lex.equals("static") || lex.equals("protected");
+    }
+
+    private boolean peekIsClass() {
+        Tokens t1 = peek(1);
+        // If current is modifier, check if next is 'class' (e.g., public class)
+        return t1 != null && "KEYWORD".equals(t1.getType()) && t1.getLexeme().equals("class");
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -839,6 +861,42 @@ public class Parser {
         return ASTNode.of("ERROR", bad, t.getLine(), t.getColumn());
     }
 
+    private ASTNode parseClassDecl() {
+        Tokens startToken = current();
+        
+        // 1. Parse Modifiers (public, static, etc.)
+        ASTNode modifiers = ASTNode.of("MODIFIERS");
+        while (isModifier()) {
+            modifiers.addChild(ASTNode.of(currentLexeme()));
+            advance();
+        }
+
+        // 2. Consume 'class' and the Class Name
+        consume("KEYWORD", "class");
+        String className = currentLexeme();
+        consume("IDENTIFIER", className);
+
+        ASTNode classNode = ASTNode.of("CLASS_DECL", className, startToken.getLine(), startToken.getColumn());
+        if (!modifiers.getChildren().isEmpty()) classNode.addChild(modifiers);
+
+        // 3. Parse the Class Body { ... }
+        consume("SPECIAL_CHAR", "{");
+        ASTNode body = ASTNode.of("CLASS_BODY");
+        while (!isAtEnd() && !check("SPECIAL_CHAR", "}")) {
+            // Inside a class, we expect methods or field declarations
+            if (isMethodStart()) {
+                body.addChild(parseMethodDecl());
+            } else {
+                ASTNode field = parseStatement(); // Handles fields like 'int x = 10;'
+                if (field != null) body.addChild(field);
+            }
+        }
+        consume("SPECIAL_CHAR", "}");
+        
+        classNode.addChild(body);
+        return classNode;
+    }
+
     // ── Method Invocation ──────────────────────────────────────────────────────
     private ASTNode parseMethodCall(String methodName, ASTNode receiver) {
         // 1. Capture the current coordinate (the '(' token)
@@ -877,6 +935,27 @@ public class Parser {
     // ═════════════════════════════════════════════════════════════════════════
     //  HELPER / UTILITY METHODS
     // ═════════════════════════════════════════════════════════════════════════
+
+    private boolean isMethodStart() {
+    // Case 1: Starts with a modifier (public, private, static, etc.)
+    if (isModifier()) {
+        // Look ahead to see if it's followed by a type and name: Modifier Type Name (
+        if (peekIsType() && checkPeek(2, "IDENTIFIER", null) && checkPeek(3, "SPECIAL_CHAR", "(")) {
+            return true;
+        }
+        // Handles cases with multiple modifiers: public static ...
+        if (peekIsModifier()) {
+            return true; 
+        }
+    } 
+    // Case 2: Starts directly with a type: int calculate(
+    else if (isTypeKeyword()) {
+        if (peekIsIdentifier() && checkPeek(2, "SPECIAL_CHAR", "(")) {
+            return true;
+        }
+    }
+    return false;
+}
 
     private boolean isAtEnd() { return pos >= tokens.size(); }
 
@@ -990,6 +1069,8 @@ public class Parser {
     private boolean isTypeKeyword() {
         String type = currentType();
         String lex = currentLexeme();
+
+        boolean isBaseType = false;
         
         // 1. Check if it's a primitive keyword (int, double, void, etc.) or reference type (String)
         if ("KEYWORD".equals(type)) {
@@ -1001,10 +1082,19 @@ public class Parser {
         // 2. DYNAMIC CHECK: If it's an Identifier starting with an Uppercase letter,
         // we treat it as a Reference Type (like MyClass, etc.)
         if ("IDENTIFIER".equals(type) && !lex.isEmpty() && Character.isUpperCase(lex.charAt(0))) {
-            return true;
+            isBaseType = true;
         }
 
-        return false;
+        if (isBaseType) {
+                Tokens next = peek(1);
+                Tokens next2 = peek(2);
+                if (next != null && next.getLexeme().equals("[") && 
+                    next2 != null && next2.getLexeme().equals("]")) {
+                    return true; // It's an array type like String[]
+                }
+                return true; // It's a standard type
+            }
+    return false;
     }
 
     private boolean isModifier() {

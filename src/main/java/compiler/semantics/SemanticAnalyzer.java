@@ -92,6 +92,12 @@ public class SemanticAnalyzer {
                     inferExpressionType(node.getChildren().get(0)); 
                 }
                 break;
+            case "CLASS_DECL":
+                // Classes introduce a new scope level for fields and methods
+                symbolTable.enterScope(); 
+                analyzeChildren(node);
+                symbolTable.exitScope();
+                break;
             default:
                 analyzeChildren(node);
                 break;
@@ -602,17 +608,29 @@ public class SemanticAnalyzer {
                 return value;
 
             case "ARRAY_ACCESS":
-                // arr[i] returns the element type; for now assume int
-                // In a real compiler, we'd track array component types
                 List<ASTNode> accessChildren = expr.getChildren();
-                if (!accessChildren.isEmpty()) {
-                    String arrayType = inferExpressionType(accessChildren.get(0));
-                    // Remove array brackets if present
+                if (accessChildren.size() >= 2) {
+                    String arrayType = inferExpressionType(accessChildren.get(0)); // e.g., "String[]"
+                    String indexType = inferExpressionType(accessChildren.get(1)); // e.g., "int"
+
+                    // 1. Validate that the array index is strictly an integer
+                    if (indexType != null && !indexType.equals("int") && !indexType.equals("type_error")) {
+                        ErrorHandler.report("Semantic Error: Array index must be int, found " + indexType + ".", 
+                                            expr.getLine(), expr.getColumn());
+                    }
+
+                    // 2. Resolve the element type (e.g., "String[]" becomes "String")
                     if (arrayType != null && arrayType.endsWith("[]")) {
-                        return arrayType.substring(0, arrayType.length() - 2);
+                        return arrayType.substring(0, arrayType.length() - 2); 
+                    }
+                    
+                    // If the variable being accessed isn't actually an array
+                    if (arrayType != null && !arrayType.equals("type_error")) {
+                        ErrorHandler.report("Semantic Error: The variable is not an array type.", 
+                                            expr.getLine(), expr.getColumn());
                     }
                 }
-                return "int";
+                return "type_error"; // Use sentinel to suppress secondary errors
 
             case "FIELD_ACCESS":
                 // obj.field returns unknown (would need class definitions)
@@ -624,6 +642,7 @@ public class SemanticAnalyzer {
                     return inferExpressionType(expr.getChildren().get(0));
                 }
                 return "int";
+                
 
             case "ERROR":
                 return "unknown"; // Prevents the 'null' return that causes "found null"
@@ -670,6 +689,16 @@ public class SemanticAnalyzer {
      */
     private boolean isTypeCompatible(String expectedType, String actualType) {
         if (expectedType.equals(actualType)) return true;
+
+        // Support null assignment for arrays/objects
+        if (actualType.equals("Object") && (expectedType.endsWith("[]") || expectedType.equals("String"))) {
+            return true;
+        }
+
+        // Explicitly block widening for arrays (e.g., cannot assign int[] to double[])
+        if (expectedType.endsWith("[]") || actualType.endsWith("[]")) {
+            return expectedType.equals(actualType);
+        }
         
         // Allowed Widening Conversions
         List<String> numericHierarchy = java.util.Arrays.asList("byte", "short", "int", "long", "float", "double");
