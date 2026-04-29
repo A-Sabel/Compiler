@@ -1,7 +1,6 @@
 # Compiler Engineering: Unified Rulebook & Specification
 **Version:** 1.0.0
-**Target Language:** Java Subset 
-**Target Audience:** Compiler Engineering Team
+**Target Language:** Java
 
 ---
 

@@ -1,0 +1,111 @@
+int a = 10;
+int b = 20;
+int max = (a > b) ? a : b;
+String error = (a < b) ? "Smaller" : 50;
+
+
+int complexMath() {
+    return (1 + (2 + (3 + (4 + (5 + (6 + 7))))));
+}
+
+int fibonacci(int n) {
+    if (n <= 1) return n;
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+
+void process(int count, String name) { }
+
+void main() {
+    process(10); // ERROR 3: Arity mismatch (Expected 2, got 1)
+    process("Ten", "Andrea"); // ERROR 4: Type mismatch (Arg 1: Expected int, got String)
+}
+
+
+
+void badMath() {
+    String str = "Hello" + "World"; // PASS: String concatenation
+    String badStr = "Hello" - "World"; // ERROR: Operator '-' requires numeric operands
+    boolean b = true * false; // ERROR: Operator '*' requires numeric operands
+}
+
+
+
+// --- LEVEL 1: The Basics (Simple Variables & Types) ---
+void levelOne() {
+    int a = 10;
+    int b = 20;
+    int sum = a + b;           // PASS: Standard math is legal
+    
+    int a = 30;                // ERROR: Variable 'a' is already defined in this scope
+    c = 50;                    // ERROR: Variable 'c' used in assignment before declaration
+    
+    String greeting = "Hello";
+    int badString = "World";   // ERROR: Type mismatch. Variable 'badString' is int but initialized with String
+}
+
+// --- LEVEL 2: Operators & Logic (Medium) ---
+void levelTwo() {
+    boolean isTrue = true;
+    boolean isFalse = false;
+    
+    boolean logic = isTrue && isFalse; // PASS: Boolean logic
+    boolean badLogic = isTrue && 10;   // ERROR: Operator '&&' requires boolean operands
+    
+    String concat = "Score: " + 100;   // PASS: String concatenation allows mixed types
+    int badMath = "Score" * 10;        // ERROR: Operator '*' cannot be applied to 'String' and 'int'
+    
+    int division = 100 / 0;            // ERROR: Arithmetic Exception: / by zero
+}
+
+// --- LEVEL 3: Control Flow & Scoping (Medium-Hard) ---
+void levelThree() {
+    int outer = 5;
+    
+    for (int i = 0; i < 3; i = i + 1) {
+        int inner = outer * i; // PASS: Accessing outer scope from inside loop
+        outer = inner;         // PASS: Modifying outer scope
+    }
+    
+    inner = 10;                // ERROR: Variable 'inner' used before declaration (it died in the loop)
+    int i = 99;                // PASS: 'i' died in the loop, so redeclaring it here is totally legal
+}
+
+// --- LEVEL 4: Methods & Contracts (Hard) ---
+int calculate(int x, int y) {
+    return x + y;              // PASS: Returns an int
+}
+
+void processData(String data) {
+    // void method, no return needed
+}
+
+int levelFour() {
+    int result1 = calculate(10, 20);      // PASS: Correct arity and types
+    
+    int result2 = calculate(10);          // ERROR: Method 'calculate' expects 2 argument(s), but got 1
+    int result3 = calculate(10, "20");    // ERROR: Argument 2 of 'calculate' expects int but got String
+    
+    int result4 = processData("Test");    // ERROR: Type mismatch in initialization (Cannot assign void to int)
+    
+    return "Done";                        // ERROR: Incompatible return type. Expected 'int' but got 'String'
+}
+
+// --- LEVEL 5: The "Boss Fight" (Ternaries & Dead Code) ---
+void levelFive() {
+    int val1 = 10;
+    double val2 = 20.5;
+    
+    // Ternary type promotion
+    double max = (val1 > val2) ? val1 : val2; // PASS: int and double promote cleanly to double
+    int badMax = (val1 > val2) ? val1 : val2; // ERROR: Type mismatch (initialized with double)
+    
+    // Sentinel Trap: Branch mismatch
+    String decision = (val1 == 10) ? "Yes" : false; // ERROR: Incompatible ternary branches ('String' and 'boolean')
+    // Note: Due to our Sentinel fix, 'decision' should NOT trigger a secondary initialization error!
+
+    // Dead Code Detection
+    return;
+    
+    int zombie = 100; // ERROR: Unreachable statement
+}

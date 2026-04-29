@@ -12,15 +12,19 @@ public class ASTNode {
     private final String type;      // e.g., "ASSIGN", "IF", "BINARY_OP"
     private final String value;     // e.g., "=", "+", "x", "5"
     private final List<ASTNode> children;
+    private final int line;
+    private final int column;
 
-    public ASTNode(String type, String value) {
-        this.type     = type;
-        this.value    = value;
+    public ASTNode(String type, String value, int line, int column) {
+        this.type = type;
+        this.value = value;
+        this.line = line;
+        this.column = column;
         this.children = new ArrayList<>();
     }
 
-    public ASTNode(String type) {
-        this(type, null);
+    public ASTNode(String type, int line, int column) {
+        this(type, null, line, column);
     }
 
     // ── Child Management ───────────────────────────────────────────────────────
@@ -31,6 +35,8 @@ public class ASTNode {
     // ── Getters ────────────────────────────────────────────────────────────────
     public String       getType()     { return type; }
     public String       getValue()    { return value; }
+    public int getLine() { return line; }
+    public int getColumn() { return column; }
     public List<ASTNode> getChildren() { return children; }
 
     // ── Pretty-print (used by ASTExporter) ────────────────────────────────────
@@ -38,7 +44,18 @@ public class ASTNode {
         return value != null ? type + "(" + value + ")" : type;
     }
 
-    // ── Node factory helpers (keeps Parser code readable) ─────────────────────
-    public static ASTNode of(String type)                   { return new ASTNode(type); }
-    public static ASTNode of(String type, String value)     { return new ASTNode(type, value); }
+    // Updated Factory Helpers
+    public static ASTNode of(String type, int line, int column) {
+        return new ASTNode(type, line, column);
+    }
+    public static ASTNode of(String type, String value, int line, int column) {
+        return new ASTNode(type, value, line, column);
+    }
+    public static ASTNode of(String type, String value) {
+        return new ASTNode(type, value, -1, -1);
+    }
+    // Fallback for root nodes
+    public static ASTNode of(String type) {
+        return new ASTNode(type, -1, -1);
+    }
 }

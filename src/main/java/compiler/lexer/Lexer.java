@@ -168,14 +168,14 @@ import compiler.util.ErrorHandler;
                     if (prefix == 'x' || prefix == 'X') {
                         sb.append(prefix);
                         advance();
-                        boolean hasDigits = false;
+                        boolean hexHasDigits = false;
                         while (pos < sourceCode.length() && isHexDigit(sourceCode.charAt(pos))) {
                             sb.append(sourceCode.charAt(pos));
                             advance();
-                            hasDigits = true;
+                            hexHasDigits = true;
                         }
-                        if (!hasDigits) {
-                            ErrorHandler.report("Invalid hex literal: no digits after 0x", line, startCol);
+                        if (!hexHasDigits) {
+                            ErrorHandler.report("Invalid hex literal", line, startCol);
                         }
                         tokens.add(Tokenfactory.createToken(sb.toString(), "CONSTANT", line, startCol));
                         return;
@@ -185,13 +185,13 @@ import compiler.util.ErrorHandler;
                     if (prefix == 'b' || prefix == 'B') {
                         sb.append(prefix);
                         advance();
-                        boolean hasDigits = false;
+                        boolean binHasDigits = false;
                         while (pos < sourceCode.length() && (sourceCode.charAt(pos) == '0' || sourceCode.charAt(pos) == '1')) {
                             sb.append(sourceCode.charAt(pos));
                             advance();
-                            hasDigits = true;
+                            binHasDigits = true;
                         }
-                        if (!hasDigits) {
+                        if (!binHasDigits) {
                             ErrorHandler.report("Invalid binary literal: no digits after 0b", line, startCol);
                         }
                         tokens.add(Tokenfactory.createToken(sb.toString(), "CONSTANT", line, startCol));
@@ -200,7 +200,6 @@ import compiler.util.ErrorHandler;
                     
                     // Octal (0-7 prefix, but NOT 0. for float)
                     if (CharMatcher.isDigit(prefix) && prefix != '8' && prefix != '9') {
-                        // This is an octal number (old Java style: 0123)
                         while (pos < sourceCode.length()) {
                             char c = sourceCode.charAt(pos);
                             if (c >= '0' && c <= '7') {
@@ -260,7 +259,23 @@ import compiler.util.ErrorHandler;
                     break; 
                 }
             }
-            tokens.add(Tokenfactory.createToken(sb.toString(), "CONSTANT", line, startCol));
+            
+            String numberStr = sb.toString();
+
+            // Rule E.3: Integer Overflow Prevention
+            // Only test bounds if it's a raw integer (no decimal or scientific exponent)
+            if (!hasDecimal && !hasExponent) {
+                try {
+                    long value = Long.parseLong(numberStr);
+                    if (value > Integer.MAX_VALUE) { 
+                        ErrorHandler.report("Lexical Error: Integer Number Too Large", line, startCol);
+                    }
+                } catch (NumberFormatException e) {
+                    ErrorHandler.report("Lexical Error: Integer Number Too Large", line, startCol);
+                }
+            }
+
+            tokens.add(Tokenfactory.createToken(numberStr, "CONSTANT", line, startCol));
         }
         
         private boolean isHexDigit(char c) {

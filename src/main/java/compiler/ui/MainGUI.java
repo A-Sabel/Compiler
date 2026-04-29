@@ -1,5 +1,4 @@
 package compiler.ui;
-
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -43,9 +42,12 @@ import javax.swing.WindowConstants;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 
-import compiler.lexer.models.Tokens;
 import compiler.lexer.Lexer;
 import compiler.lexer.SymbolTable;
+import compiler.lexer.models.Tokens;
+import compiler.parser.Parser;
+import compiler.parser.ast.ASTNode;
+import compiler.semantics.SemanticAnalyzer;
 import compiler.util.ErrorHandler;
 
 /* VIEW CLASS: Main Application Window
@@ -226,23 +228,31 @@ public class MainGUI extends JFrame {
             }
         });
 
-        // ── TOKENIZE ──────────────────────────────────────────────────────────
+        // ── COMPILE PIPELINE ──────────────────────────────────────────────────
         Tokenize.addActionListener(e -> {
             String code = CodeInputArea.getText();
             if (code.trim().isEmpty()) return;
 
-            // Run Lexer in background to keep GUI responsive
+            // Run in background to keep GUI responsive
             new Thread(() -> {
                 long startTime = System.nanoTime();
                 
-                Lexer lexer =
-                        new Lexer(code);
+                // Phase 1: Lexical Analysis (Scanner)
+                Lexer lexer = new Lexer(code);
                 List<Tokens> tokens = lexer.tokenize();
                 
-                long endTime = System.nanoTime();
-                long executionTimeMs = (endTime - startTime) / 1_000_000; // Convert to milliseconds
+                // Phase 2: Syntax Analysis (Parser)
+                Parser parser = new Parser(tokens);
+                ASTNode rootNode = parser.parse();
                 
-                // Store tokens for CSV export
+                // Phase 3: Semantic Analysis (Logic & Types)
+                SemanticAnalyzer semanticAnalyzer = new SemanticAnalyzer();
+                semanticAnalyzer.analyze(rootNode);
+                
+                long endTime = System.nanoTime();
+                long executionTimeMs = (endTime - startTime) / 1_000_000; 
+                
+                // Store tokens for CSV export & Table generation
                 currentTokens = new ArrayList<>(tokens);
 
                 // Build the two count maps that ResultTable.populate() needs
@@ -255,29 +265,26 @@ public class MainGUI extends JFrame {
                     categoryCounts.put(cat, categoryCounts.getOrDefault(cat, 0) + 1);
                 }
 
-                // Collect errors
-                List<String> errors =
-                        ErrorHandler.getErrors();
+                // Collect errors from ALL THREE phases
+                List<String> errors = ErrorHandler.getErrors();
 
                 int totalTokens  = tokens.size();
-                int uniqueIds    = SymbolTable
-                        .getInstance().getAllIdentifiers().size();
+                int uniqueIds    = SymbolTable.getInstance().getAllIdentifiers().size();
                 int errorCount   = errors.size();
 
-                // All UI updates must happen on the Event Dispatch Thread
+                // UI updates must happen on the Event Dispatch Thread
                 SwingUtilities.invokeLater(() -> {
                     resultTable.populate(tokens, lexemeCounts, categoryCounts);
                     updateStatLabels(totalTokens, uniqueIds, errorCount, executionTimeMs);
 
-                    // Setup table filtering
                     setupTableFiltering();
                     applyTableFilter();
 
-                    // Show error details
+                    // Display the accumulated errors in the GUI's Error Tab
                     if (errorCount > 0) {
                         errorDetailArea.setText(String.join("\n", errors));
                     } else {
-                        errorDetailArea.setText("No errors detected.");
+                        errorDetailArea.setText("Compilation Successful! No errors detected.");
                     }
                 });
             }).start();

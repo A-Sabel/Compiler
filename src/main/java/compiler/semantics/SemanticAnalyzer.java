@@ -8,6 +8,11 @@ import compiler.util.ErrorHandler;
 public class SemanticAnalyzer {
     private final SymbolTable symbolTable;
 
+    private String currentMethodReturnType = null;
+
+    private int loopDepth = 0;
+    private boolean isReachable = true;
+
     public SemanticAnalyzer() {
         this.symbolTable = new SymbolTable();
     }
@@ -21,41 +26,68 @@ public class SemanticAnalyzer {
             case "PROGRAM":
                 analyzeChildren(node);
                 break;
-
-            case "BLOCK":
-                symbolTable.enterScope();
-                analyzeChildren(node);
-                symbolTable.exitScope();
+            case "METHOD_DECL":
+                validateMethodDeclaration(node);
                 break;
-
+            case "BLOCK":
+                analyzeBlock(node);
+                break;
             case "VAR_DECL":
                 validateVariableDeclaration(node);
                 break;
-
             case "ASSIGN":
                 validateAssignment(node);
                 break;
-
+            case "EXPRESSION_STMT":
+                if (!node.getChildren().isEmpty()) {
+                    inferExpressionType(node.getChildren().get(0)); 
+                }
+                break;
+            case "METHOD_CALL":
+                inferExpressionType(node);
+                break;
             case "BINARY_OP":
                 validateBinaryOperation(node);
                 break;
-
+            case "RETURN":
+                validateReturnStatement(node);
+                break;
             case "IF":
-            case "WHILE":
-            case "DO_WHILE":
-            case "FOR":
-            case "SWITCH":
+                validateBooleanCondition(node);
                 analyzeChildren(node);
                 break;
-
+            case "WHILE":
+            case "DO_WHILE":
+                loopDepth++;
+                validateBooleanCondition(node);
+                analyzeChildren(node);
+                loopDepth--;
+                break;
+            case "FOR":
+                symbolTable.enterScope();
+                loopDepth++;
+                analyzeChildren(node);
+                loopDepth--;
+                symbolTable.exitScope();
+                break;
             case "BREAK":
             case "CONTINUE":
-                // These are simple control flow statements
-                // In a full implementation, would verify they're inside a loop
+                if (loopDepth <= 0) {
+                    ErrorHandler.report(
+                        "Semantic Error: '" + nodeType.toLowerCase() + "' statement used outside of a loop.",
+                        node.getLine(),
+                        node.getColumn());
+                }
                 break;
-
+            case "SWITCH":
+                // Switch isn't a loop, but 'break' is legal inside it. 
+                // A strict implementation tracks switch depth separately, 
+                // but for this subset, incrementing loopDepth temporarily works to allow breaks.
+                loopDepth++;
+                analyzeChildren(node);
+                loopDepth--;
+                break;
             default:
-                // For all other nodes, just traverse
                 analyzeChildren(node);
                 break;
         }
@@ -67,36 +99,147 @@ public class SemanticAnalyzer {
      */
     private void validateVariableDeclaration(ASTNode node) {
         List<ASTNode> children = node.getChildren();
+        
+        // 1. Structural Check
         if (children.size() < 2) {
-            ErrorHandler.report("Semantic Error: Invalid variable declaration structure", -1, -1);
+            ErrorHandler.report("Semantic Error: Invalid variable declaration structure", 
+                                node.getLine(), node.getColumn());
             return;
         }
 
-        String type = children.get(0).getValue();
-        String name = children.get(1).getValue();
+        ASTNode typeNode = children.get(0);
+        ASTNode nameNode = children.get(1);
+        String type = typeNode.getValue();
+        String name = nameNode.getValue();
 
+        // 2. Duplicate Definition Check
         if (symbolTable.isDefinedInCurrentScope(name)) {
-            ErrorHandler.report("Semantic Error: Variable '" + name + "' is already defined in this scope.", -1, -1);
+            ErrorHandler.report("Semantic Error: Variable '" + name + "' is already defined in this scope.", 
+                                nameNode.getLine(), nameNode.getColumn());
             return;
         }
 
-        // Check if there's an initializer
+        // 3. Initializer Logic
         if (children.size() >= 3) {
-            // INIT_VALUE is typically a wrapper node; get the actual expression
-            ASTNode initWrapper = children.get(2); // INIT_VALUE node
+            ASTNode initWrapper = children.get(2);
             ASTNode initExpr = initWrapper.getChildren().isEmpty() ? initWrapper : initWrapper.getChildren().get(0);
             
+            // This single line does ALL the recursive heavy lifting for the right side!
             String initType = inferExpressionType(initExpr);
-            if (initType != null && !isTypeCompatible(type, initType)) {
+
+            // Sentinel Type Strategy
+            if (initType != null && !initType.equals("type_error") && !isTypeCompatible(type, initType)) {
                 ErrorHandler.report(
                     "Semantic Error: Type mismatch in initialization. Variable '" + name + 
-                    "' is " + type + " but initialized with " + initType + ".", -1, -1);
+                    "' is " + type + " but initialized with " + initType + ".", 
+                    initExpr.getLine(), initExpr.getColumn()); 
             }
         }
 
-        // Register the variable
+        // 4. Register and Finish 
         symbolTable.defineVariable(name, type);
-        analyzeChildren(node);
+        
+        // REMOVED: analyzeChildren(node); 
+        // We do not want to re-analyze the initializer and trigger duplicate errors!
+    }
+
+    /**
+     * Validates method declarations and sets up parameter scoping.
+     * Structure: METHOD_DECL(name) -> [MODIFIERS?, RETURN_TYPE, PARAMS, BODY]
+     */
+    private void validateMethodDeclaration(ASTNode node) {
+        String methodName = node.getValue();
+        
+        String returnType = "void";
+        ASTNode paramsNode = null;
+        ASTNode bodyNode = null;
+
+        // Safely locate children regardless of whether MODIFIERS exist
+        for (ASTNode child : node.getChildren()) {
+            if (child.getType().equals("RETURN_TYPE")) returnType = child.getValue();
+            else if (child.getType().equals("PARAMS")) paramsNode = child;
+            else if (child.getType().equals("BODY")) bodyNode = child;
+        }
+        
+        List<String> paramTypes = new java.util.ArrayList<>();
+        List<String> paramNames = new java.util.ArrayList<>();
+        
+        // Extract parameters safely by targeting the exact child nodes
+        if (paramsNode != null) {
+            for (ASTNode paramNode : paramsNode.getChildren()) {
+                // The PARAM node has two children: TYPE and NAME
+                if (paramNode.getChildren().size() >= 2) {
+                    paramTypes.add(paramNode.getChildren().get(0).getValue()); 
+                    paramNames.add(paramNode.getChildren().get(1).getValue()); 
+                }
+            }
+        }
+        
+        // 1. Definition check (Check for exact duplicates)
+        List<SymbolTable.MethodSignature> overloads = symbolTable.lookupMethods(methodName);
+        boolean isDuplicate = false;
+        
+        if (overloads != null) {
+            for (SymbolTable.MethodSignature sig : overloads) {
+                if (sig.parameterTypes.equals(paramTypes)) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+        }
+        
+        if (isDuplicate) {
+            ErrorHandler.report("Semantic Error: Duplicate method signature for '" + methodName + "'.", -1, -1);
+        } else {
+            symbolTable.defineMethod(methodName, returnType, paramTypes);
+        }
+        
+        // 2. Scope setup for the method body
+        currentMethodReturnType = returnType;
+        symbolTable.enterScope();
+        
+        // Define parameters as local variables inside the method's scope
+        for (int i = 0; i < paramNames.size(); i++) {
+            symbolTable.defineVariable(paramNames.get(i), paramTypes.get(i));
+        }
+        
+        // 3. Analyze the actual code inside the method
+        if (bodyNode != null) {
+            analyze(bodyNode);
+        }
+        
+        symbolTable.exitScope();
+        currentMethodReturnType = null; // Leaving the method
+    }
+
+    /**
+     * Validates that return statements match the method's declared return type.
+     */
+    private void validateReturnStatement(ASTNode node) {
+        if (currentMethodReturnType == null) {
+            ErrorHandler.report("Semantic Error: return statement outside of method.", 
+                                node.getLine(), node.getColumn());
+            return;
+        }
+
+        boolean hasReturnValue = !node.getChildren().isEmpty();
+
+        if (currentMethodReturnType.equals("void") && hasReturnValue) {
+            ErrorHandler.report("Semantic Error: void method cannot return a value.", 
+                                node.getLine(), node.getColumn());
+        } 
+        else if (!currentMethodReturnType.equals("void") && !hasReturnValue) {
+            ErrorHandler.report("Semantic Error: Missing return value for method expecting '" + currentMethodReturnType + "'.", 
+                                node.getLine(), node.getColumn());
+        }
+        else if (hasReturnValue) {
+            String actualType = inferExpressionType(node.getChildren().get(0));
+            if (!isTypeCompatible(currentMethodReturnType, actualType)) {
+                // target the coordinates of the RETURN node
+                ErrorHandler.report("Semantic Error: Incompatible return type. Expected '" + currentMethodReturnType + "' but got '" + actualType + "'.", 
+                                    node.getLine(), node.getColumn());
+            }
+        }
     }
 
     /**
@@ -106,17 +249,16 @@ public class SemanticAnalyzer {
     private void validateAssignment(ASTNode node) {
         List<ASTNode> children = node.getChildren();
         if (children.size() < 2) {
-            analyzeChildren(node);
-            return;
+            return; // Exit cleanly
         }
 
         ASTNode lhs = children.get(0);
         ASTNode rhs = children.get(1);
 
-        // LHS must be an identifier
-        if (!"IDENTIFIER".equals(lhs.getType())) {
-            ErrorHandler.report("Semantic Error: Assignment target must be an identifier.", -1, -1);
-            analyzeChildren(node);
+        // Rule E.1: LHS must be a valid assignment target (L-Value)
+        String lhsTypeNode = lhs.getType();
+        if (!lhsTypeNode.equals("IDENTIFIER") && !lhsTypeNode.equals("FIELD_ACCESS") && !lhsTypeNode.equals("ARRAY_ACCESS")) {
+            ErrorHandler.report("Semantic Error: Invalid assignment target.", node.getLine(), node.getColumn());
             return;
         }
 
@@ -125,20 +267,23 @@ public class SemanticAnalyzer {
 
         if (varType == null) {
             ErrorHandler.report(
-                "Semantic Error: Variable '" + varName + "' used in assignment before declaration.", -1, -1);
-            analyzeChildren(node);
+                "Semantic Error: Variable '" + varName + "' used in assignment before declaration.", 
+                node.getLine(), node.getColumn());
             return;
         }
 
         // Check RHS type compatibility
+        // This single line recursively checks the entire right side of the equals sign!
         String rhsType = inferExpressionType(rhs);
-        if (rhsType != null && !isTypeCompatible(varType, rhsType)) {
+        
+        if (rhsType != null && !rhsType.equals("type_error") && !isTypeCompatible(varType, rhsType)) {
             ErrorHandler.report(
-                "Semantic Error: Cannot assign " + rhsType + " to " + varType + ".", -1, -1);
+                "Semantic Error: Cannot assign " + rhsType + " to " + varType + ".", 
+                node.getLine(), node.getColumn());
         }
 
-        // Still analyze children for nested variable references
-        analyzeChildren(node);
+        // REMOVED: analyzeChildren(node);
+        // We let inferExpressionType handle the validation of the RHS to avoid spam.
     }
 
     /**
@@ -152,25 +297,36 @@ public class SemanticAnalyzer {
             return;
         }
 
-        String op = node.getValue(); // Operator like "+", "-", "&&", etc.
+        String op = node.getValue(); // Defined here for use in the check below
         ASTNode left = children.get(0);
-        ASTNode right = children.get(1);
+        ASTNode right = children.get(1); // Defined here
 
         String leftType = inferExpressionType(left);
         String rightType = inferExpressionType(right);
 
-        // Validate operand types against operator
-        if (leftType != null && rightType != null) {
-            validateOperatorTypes(op, leftType, rightType);
+        boolean isZeroLiteral = right.getType().equals("NUMBER") && 
+                                (right.getValue().equals("0") || right.getValue().equals("0.0"));
+
+        // Rule 13: Division/modulo by literal zero
+        if ((op.equals("/") || op.equals("%")) && isZeroLiteral) {
+            // We use right.getLine() and right.getColumn() to target the '0' precisely
+            ErrorHandler.report("Semantic Error: Arithmetic Exception: / by zero.", 
+                                right.getLine(), right.getColumn());
         }
 
+        if (leftType != null && rightType != null) {
+            validateOperatorTypes(op, leftType, rightType, node.getLine(), node.getColumn());
+        }
         analyzeChildren(node);
     }
 
     /**
      * Validates that an operator is legal for its operand types.
      */
-    private void validateOperatorTypes(String op, String leftType, String rightType) {
+    /**
+     * Validates that an operator is legal for its operand types.
+     */
+    private void validateOperatorTypes(String op, String leftType, String rightType, int line, int col) {
         switch (op) {
             // Arithmetic operators: require numeric types
             case "+":
@@ -178,23 +334,16 @@ public class SemanticAnalyzer {
             case "*":
             case "/":
             case "%":
-                if (!isNumericType(leftType) && !leftType.equals("String")) {
-                    ErrorHandler.report(
-                        "Semantic Error: Operator '" + op + "' requires numeric or String operands, got " + leftType, -1, -1);
-                }
-                if (!isNumericType(rightType) && !rightType.equals("String")) {
-                    ErrorHandler.report(
-                        "Semantic Error: Operator '" + op + "' requires numeric or String operands, got " + rightType, -1, -1);
-                }
-                // String concatenation is OK with +
+                // 1. Check for valid String concatenation first
                 if (op.equals("+") && (leftType.equals("String") || rightType.equals("String"))) {
-                    return; // String + anything is allowed
+                    return; // Legal: String + anything
                 }
-                // Both must be numeric for other arithmetic
+                
+                // 2. If it's not string concatenation, BOTH operands strictly must be numeric
                 if (!isNumericType(leftType) || !isNumericType(rightType)) {
                     ErrorHandler.report(
-                        "Semantic Error: Both operands of '" + op + "' must be numeric, got " + 
-                        leftType + " and " + rightType, -1, -1);
+                        "Semantic Error: Operator '" + op + "' cannot be applied to '" + 
+                        leftType + "' and '" + rightType + "'.", line, col);
                 }
                 break;
 
@@ -206,7 +355,7 @@ public class SemanticAnalyzer {
                 if (!isNumericType(leftType) || !isNumericType(rightType)) {
                     ErrorHandler.report(
                         "Semantic Error: Comparison '" + op + "' requires numeric operands, got " + 
-                        leftType + " and " + rightType, -1, -1);
+                        leftType + " and " + rightType, line, col);
                 }
                 break;
 
@@ -216,7 +365,7 @@ public class SemanticAnalyzer {
                 if (!isTypeCompatible(leftType, rightType)) {
                     ErrorHandler.report(
                         "Semantic Error: Cannot compare " + leftType + " with " + rightType + 
-                        " using '" + op + "'", -1, -1);
+                        " using '" + op + "'", line, col);
                 }
                 break;
 
@@ -225,11 +374,11 @@ public class SemanticAnalyzer {
             case "||":
                 if (!leftType.equals("boolean")) {
                     ErrorHandler.report(
-                        "Semantic Error: Operator '" + op + "' requires boolean operands, got " + leftType, -1, -1);
+                        "Semantic Error: Operator '" + op + "' requires boolean operands, got " + leftType, line, col);
                 }
                 if (!rightType.equals("boolean")) {
                     ErrorHandler.report(
-                        "Semantic Error: Operator '" + op + "' requires boolean operands, got " + rightType, -1, -1);
+                        "Semantic Error: Operator '" + op + "' requires boolean operands, got " + rightType, line, col);
                 }
                 break;
 
@@ -243,7 +392,7 @@ public class SemanticAnalyzer {
                 if (!isIntegralType(leftType) || !isIntegralType(rightType)) {
                     ErrorHandler.report(
                         "Semantic Error: Bitwise operator '" + op + "' requires integral operands, got " + 
-                        leftType + " and " + rightType, -1, -1);
+                        leftType + " and " + rightType, line, col);
                 }
                 break;
         }
@@ -283,30 +432,52 @@ public class SemanticAnalyzer {
 
             case "BINARY_OP":
                 String op = value;
-                // Logical operations return boolean
-                if (op.equals("&&") || op.equals("||")) return "boolean";
-                // Comparison returns boolean
-                if (op.equals("<") || op.equals(">") || op.equals("<=") || 
-                    op.equals(">=") || op.equals("==") || op.equals("!=")) {
-                    return "boolean";
-                }
-                // Arithmetic: infer from operands
+                
                 List<ASTNode> children = expr.getChildren();
                 if (children.size() >= 2) {
-                    String leftType = inferExpressionType(children.get(0));
-                    String rightType = inferExpressionType(children.get(1));
+                    ASTNode leftNode = children.get(0);
+                    ASTNode rightNode = children.get(1);
                     
+                    String leftType = inferExpressionType(leftNode);
+                    String rightType = inferExpressionType(rightNode);
+                    
+                    // --- 1. Division by Zero Check ---
+                    if ((op.equals("/") || op.equals("%")) && rightNode.getType().equals("NUMBER") && 
+                        (rightNode.getValue().equals("0") || rightNode.getValue().equals("0.0"))) {
+                        ErrorHandler.report("Semantic Error: Arithmetic Exception: / by zero.", 
+                                            rightNode.getLine(), rightNode.getColumn());
+                    }
+
+                    // --- 2. Run the Operator Validation ---
+                    if (leftType != null && rightType != null) {
+                        validateOperatorTypes(op, leftType, rightType, expr.getLine(), expr.getColumn());
+                    }
+                    
+                    // --- 3. Determine Return Type ---
+                    // Logical and Comparison return boolean
+                    if (op.equals("&&") || op.equals("||") || 
+                        op.equals("<") || op.equals(">") || op.equals("<=") || 
+                        op.equals(">=") || op.equals("==") || op.equals("!=")) {
+                        return "boolean";
+                    }
+
                     // String concatenation with +
-                    if (op.equals("+") && (leftType.equals("String") || rightType.equals("String"))) {
+                    if (op.equals("+") && ("String".equals(leftType) || "String".equals(rightType))) {
                         return "String";
                     }
                     
-                    // Promote to double if either is double
+                    // The Sentinel (Suppress cascading errors)
+                    if ("type_error".equals(leftType) || "type_error".equals(rightType) || 
+                        (!isNumericType(leftType) && !isNumericType(rightType))) {
+                        return "type_error"; 
+                    }
+                    
+                    // Promote to double/float
                     if ("double".equals(leftType) || "double".equals(rightType)) return "double";
                     if ("float".equals(leftType) || "float".equals(rightType)) return "float";
                     return "int";
                 }
-                return "int";
+                return "unknown";
 
             case "UNARY_OP":
                 if (value.equals("!")) return "boolean";
@@ -317,25 +488,104 @@ public class SemanticAnalyzer {
                 return "int";
 
             case "METHOD_CALL":
-                // For now, assume method calls return their inferred type or int
-                return "int";
+                String methodName = value;
+                List<SymbolTable.MethodSignature> possibleMethods = symbolTable.lookupMethods(methodName);
+                
+                // 1. Definition Check
+                if (possibleMethods == null || possibleMethods.isEmpty()) {
+                    ErrorHandler.report("Semantic Error: Call to undefined method '" + methodName + "'.", 
+                                        expr.getLine(), expr.getColumn());
+                    return "unknown";
+                }
+                
+                // Extract arguments safely
+                List<ASTNode> argsNodeChildren = new java.util.ArrayList<>();
+                for (ASTNode child : expr.getChildren()) {
+                    if (child.getType().equals("ARGS")) {
+                        argsNodeChildren = child.getChildren();
+                        break;
+                    }
+                }
+                
+                // Resolve provided argument types
+                List<String> providedArgTypes = new java.util.ArrayList<>();
+                for (ASTNode argExpr : argsNodeChildren) {
+                    providedArgTypes.add(inferExpressionType(argExpr));
+                }
+                
+                // --- THE UPGRADE: Specific Error Reporting for Single Methods ---
+                if (possibleMethods.size() == 1) {
+                    SymbolTable.MethodSignature sig = possibleMethods.get(0);
+                    
+                    // Arity Check
+                    if (sig.parameterTypes.size() != providedArgTypes.size()) {
+                        ErrorHandler.report("Semantic Error: Method '" + methodName + "' expects " + 
+                                            sig.parameterTypes.size() + " argument(s), but got " + providedArgTypes.size() + ".", 
+                                            expr.getLine(), expr.getColumn());
+                        return sig.returnType; // Return type to prevent cascade errors
+                    }
+                    
+                    // Type Check
+                    boolean typeError = false;
+                    for (int i = 0; i < providedArgTypes.size(); i++) {
+                        String expectedType = sig.parameterTypes.get(i);
+                        String providedType = providedArgTypes.get(i);
+                        
+                        if (providedType != null && !providedType.equals("unknown") && !isTypeCompatible(expectedType, providedType)) {
+                            ASTNode badArg = argsNodeChildren.get(i);
+                            ErrorHandler.report("Semantic Error: Argument " + (i + 1) + " of '" + methodName + 
+                                                "' expects " + expectedType + " but got " + providedType + ".", 
+                                                badArg.getLine(), badArg.getColumn()); // Targets the exact bad argument!
+                            typeError = true;
+                        }
+                    }
+                    return sig.returnType;
+                }
+                
+                // --- Fallback for Overloaded Methods (Multiple signatures) ---
+                SymbolTable.MethodSignature matchedSig = null;
+                int matchCount = 0;
+                for (SymbolTable.MethodSignature sig : possibleMethods) {
+                    if (sig.parameterTypes.size() != providedArgTypes.size()) continue; 
+                    
+                    boolean isMatch = true;
+                    for (int i = 0; i < providedArgTypes.size(); i++) {
+                        String pt = providedArgTypes.get(i);
+                        if (pt != null && !pt.equals("unknown") && !isTypeCompatible(sig.parameterTypes.get(i), pt)) {
+                            isMatch = false; break;
+                        }
+                    }
+                    if (isMatch) { matchedSig = sig; matchCount++; }
+                }
+                
+                if (matchCount == 0) {
+                    ErrorHandler.report("Semantic Error: No suitable method found for '" + methodName + "' matching arguments.", expr.getLine(), expr.getColumn());
+                    return "unknown";
+                } else if (matchCount > 1) {
+                    ErrorHandler.report("Semantic Error: Ambiguous method call for '" + methodName + "'.", expr.getLine(), expr.getColumn());
+                    return "unknown";
+                }
+                
+                return matchedSig.returnType;
 
             case "TERNARY":
-                // Ternary returns type of the then/else branches (should match)
-                List<ASTNode> ternaryChildren = expr.getChildren();
-                if (ternaryChildren.size() >= 3) {
-                    // Find THEN and ELSE branches
-                    String thenType = inferExpressionType(ternaryChildren.get(1).getChildren().isEmpty() ? 
-                                                         ternaryChildren.get(1) : ternaryChildren.get(1).getChildren().get(0));
-                    String elseType = inferExpressionType(ternaryChildren.get(2).getChildren().isEmpty() ? 
-                                                         ternaryChildren.get(2) : ternaryChildren.get(2).getChildren().get(0));
-                    // Return then type if compatible, else "Object"
-                    if (thenType != null && elseType != null && isTypeCompatible(thenType, elseType)) {
-                        return thenType;
-                    }
-                    return "Object";
+                String thenType = inferExpressionType(expr.getChildren().get(1).getChildren().get(0));
+                String elseType = inferExpressionType(expr.getChildren().get(2).getChildren().get(0));
+
+                // 1. Fail Fast on incompatibility
+                if (!isTypeCompatible(thenType, elseType) && !isTypeCompatible(elseType, thenType)) {
+                    ErrorHandler.report("Semantic Error: Incompatible ternary branches ('" + 
+                                        thenType + "' and '" + elseType + "').", 
+                                        expr.getLine(), expr.getColumn());
+                    return "type_error"; // Sentinel: tells downstream validators to skip secondary errors
                 }
-                return "Object";
+
+                // 2. Return the "Wider" type (Promotion logic)
+                if (thenType.equals("double") || elseType.equals("double")) return "double";
+                if (thenType.equals("float") || elseType.equals("float")) return "float";
+                if (thenType.equals("String") || elseType.equals("String")) return "String";
+
+                return thenType;
 
             case "CAST":
                 // Cast expression returns the target type
@@ -368,6 +618,9 @@ public class SemanticAnalyzer {
                     return inferExpressionType(expr.getChildren().get(0));
                 }
                 return "int";
+
+            case "ERROR":
+                return "unknown"; // Prevents the 'null' return that causes "found null"
 
             default:
                 return null;
@@ -407,27 +660,73 @@ public class SemanticAnalyzer {
     }
 
     /**
-     * Checks if two types are compatible (can be assigned/compared).
+     * Checks if actualType can be safely assigned to expectedType (Rule B.3)
      */
-    private boolean isTypeCompatible(String targetType, String sourceType) {
-        // Same type is always compatible
-        if (targetType.equals(sourceType)) return true;
-
-        // Numeric type widening: smaller types can be assigned to larger
-        // int -> double/float/long
-        if (targetType.equals("double") && isNumericType(sourceType)) return true;
-        if (targetType.equals("float") && !sourceType.equals("double")) return true;
-        if (targetType.equals("long") && !sourceType.equals("double") && !sourceType.equals("float")) return true;
-
-        // Object type accepts null
-        if (targetType.equals("Object") && sourceType.equals("null")) return true;
-
+    private boolean isTypeCompatible(String expectedType, String actualType) {
+        if (expectedType.equals(actualType)) return true;
+        
+        // Allowed Widening Conversions
+        List<String> numericHierarchy = java.util.Arrays.asList("byte", "short", "int", "long", "float", "double");
+        
+        int expectedIndex = numericHierarchy.indexOf(expectedType);
+        int actualIndex = numericHierarchy.indexOf(actualType);
+        
+        // If both are numeric, the actual type must be lower or equal in the hierarchy
+        if (expectedIndex != -1 && actualIndex != -1) {
+            return actualIndex <= expectedIndex; 
+        }
+        
         return false;
     }
 
     private void analyzeChildren(ASTNode node) {
         for (ASTNode child : node.getChildren()) {
             analyze(child);
+        }
+    }
+
+    /**
+     * Traverses a block and enforces dead-code detection (Rule D.2).
+     */
+    private void analyzeBlock(ASTNode node) {
+        boolean previousReachable = isReachable;
+        symbolTable.enterScope();
+        
+        for (ASTNode child : node.getChildren()) {
+            if (!isReachable) {
+                // THE FIX: Use child.getLine() and child.getColumn() instead of -1, -1
+                ErrorHandler.report("Semantic Error: Unreachable statement.", 
+                                    child.getLine(), child.getColumn());
+                break; // Report once per block to avoid spam
+            }
+            
+            analyze(child);
+            
+            String type = child.getType();
+            if (type.equals("RETURN") || type.equals("BREAK") || type.equals("CONTINUE")) {
+                isReachable = false; // Anything after this in the same block is dead code
+            }
+        }
+        
+        symbolTable.exitScope();
+        isReachable = previousReachable; // Restore reachability state for outer blocks
+    }
+
+    /**
+     * Enforces that IF, WHILE, and FOR conditions evaluate strictly to boolean (Rule D.3).
+     */
+    private void validateBooleanCondition(ASTNode loopOrIfNode) {
+        for (ASTNode child : loopOrIfNode.getChildren()) {
+            if (child.getType().equals("CONDITION")) {
+                ASTNode expression = child.getChildren().isEmpty() ? null : child.getChildren().get(0);
+                if (expression != null) {
+                    String condType = inferExpressionType(expression);
+                    if (!"boolean".equals(condType) && !"unknown".equals(condType)) {
+                        ErrorHandler.report("Semantic Error: Condition must be boolean, found " + condType + ".", -1, -1);
+                    }
+                }
+                break;
+            }
         }
     }
 }

@@ -20,6 +20,8 @@ public class SymbolTable {
         "static", "final", "abstract", "synchronized", "native", "strictfp", "transient", "volatile",
         // 4. DATA TYPES (Primitives)
         "boolean", "byte", "char", "short", "int", "long", "float", "double", "void",
+        // Common reference types treated as keywords for parsing convenience
+        "String",
         // 5. CONTROL FLOW & LOOPS
         "if", "else", "switch", "case", "default", "while", "do", "for", "break", "continue", "return",
         // 6. ERROR HANDLING
