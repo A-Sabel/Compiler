@@ -47,6 +47,7 @@ import compiler.lexer.SymbolTable;
 import compiler.lexer.models.Tokens;
 import compiler.parser.Parser;
 import compiler.parser.ast.ASTNode;
+import compiler.optimizer.Optimizer;
 import compiler.semantics.SemanticAnalyzer;
 import compiler.util.ErrorHandler;
 
@@ -251,6 +252,11 @@ public class MainGUI extends JFrame {
                 // Phase 3: Semantic Analysis (Logic & Types)
                 SemanticAnalyzer semanticAnalyzer = new SemanticAnalyzer();
                 semanticAnalyzer.analyze(rootNode);
+                
+                // Phase 4: Optimization (optional AST-level improvements)
+                Optimizer optimizer = new Optimizer();
+                ASTNode optimizedRoot = optimizer.optimize(rootNode);
+                rootNode = optimizedRoot;
                 
                 long endTime = System.nanoTime();
                 long executionTimeMs = (endTime - startTime) / 1_000_000; 
