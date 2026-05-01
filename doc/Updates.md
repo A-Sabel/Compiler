@@ -143,6 +143,78 @@
 
 ---
 
+### ⚠️ In Progress / Partially Complete
+
+### 3. Code Generation (codegen/ folder)
+
+- ✅ **Bytecode Generation (Core Implementation Completed):**
+  - Implemented full AST → bytecode translation using BytecodeGenerator
+  - Supports recursive depth-first traversal of AST nodes
+  - Generates stack-based instructions using Instruction.Opcode
+- ✅ **Expression Code Generation:**
+  - Arithmetic operations (+, -, *, /, %) correctly mapped to stack operations (ADD, SUB, MUL, DIV, MOD)
+  - Unary operations (-, !, ~, ++, --) fully supported
+  - Binary comparisons (==, !=, <, >, <=, >=) mapped to comparison opcodes
+  - Logical operators (&&, ||) implemented using short-circuit jump logic
+- ✅ **Variable Handling:**
+  - Variable declaration handled using PUSH / PUSH_CONST + STORE
+  - Variable access uses LOAD
+  - Compound assignments (+=, -=, *=, /=, %=) supported via load-modify-store pattern
+- ✅ **Control Flow Generation:**
+  - if-else statements implemented using JUMP_IF_FALSE and labeled blocks
+  - while loops implemented using start/end labels with conditional jumps
+  - do-while loops execute body before condition check
+  - for loops decomposed into:
+    - initialization
+    - condition check
+    - update section
+    - body execution
+    - continue label handling
+    - break and continue implemented using tracked loop labels (currentBreakLabel, currentContinueLabel)
+    - ⚠️ switch statements — generator logic implemented, pending parser fix for CASE node values
+- ✅ **Function / Method Support:**
+  - Method declarations supported using METHOD_START and METHOD_END
+  - Parameters stored using STORE_PARAM
+  - Method calls support both:
+  - INVOKE_STATIC
+  - INVOKE_VIRTUAL
+  - Argument count tracking implemented during call generation
+  - Return values handled using RETURN and RETURN_VALUE
+- ✅ **Object & Memory Operations:**
+  - Object creation supported using NEW
+  - Field access implemented using FIELD_LOAD and FIELD_STORE
+  - Array operations supported using ARRAY_LOAD and ARRAY_STORE
+- ✅ **Utility Features:**
+  - Automatic label generation for all control flow structures
+  - Centralized emit() system for instruction creation
+  - Stack cleanup using POP where necessary (expression statements, control flow balancing)
+
+### 4. Virtual Machine (vm/ folder)
+
+  - ❌ Not yet implemented
+  - Bytecode is currently generated but not executed
+
+### 🎯 Recent Improvements (Code Generation Layer)
+
+- **BytecodeGenerator Implementation**
+  - Implemented full instruction mapping from AST nodes to bytecode
+  - Added structured handler methods for:
+    - handleIf, handleWhile, handleFor, handleSwitch
+    - handleBinaryOp, handleUnaryOp, handleAssign
+    - handleMethodCall, handleFieldAccess, handleArrayAccess
+  - Introduced label-based control flow system for loops and conditionals
+  - Added loop context tracking for break and continue support
+- **Control Flow Enhancements**
+  - Improved for-loop translation with explicit FOR_START, FOR_CONTINUE, and FOR_END labels
+  - Fixed structured jump handling for nested loops
+  - Ensured correct restoration of previous loop contexts after exiting loops
+- **Expression Evaluation Improvements**
+  - Enforced strict stack-based evaluation order
+  - Implemented short-circuit evaluation for logical operators (&&, ||)
+  - Ensured correct operand ordering for non-commutative operations
+
+---
+
 ## Last Updated
 
-April 30, 2026
+May 1, 2026

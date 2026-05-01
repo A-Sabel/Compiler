@@ -83,3 +83,33 @@ Numeric literals have hardware-defined limits. The compiler must validate that h
 Certain mathematical operations are fundamentally illegal and must be caught during compilation if explicitly hardcoded.
 * **Constant Division by Zero:** Division (`/`) or Modulo (`%`) where the right-hand operand is explicitly the `CONSTANT` `0`.
     * *Compiler Behavior:* If the AST contains a `BINARY_OP` where the operator is `/` or `%` and the right child is evaluated as `0`, the Semantic Analyzer throws an "Arithmetic Exception: / by zero" error rather than allowing the program to crash at runtime.
+
+---
+
+## Part IV: Code Generation Specifications
+
+### 14. Bytecode Generation (Phase 4: Execution Mapping)
+* **14.1 Stack-Based Execution Model:** The Code Generator MUST translate all expressions into a stack-based instruction sequence. Every evaluated value is pushed onto the stack before any operation is performed. Arithmetic, logical, and comparison operations MUST consume operands from the stack and push the resulting value back.
+* **14.2 Instruction Emission Rule:** Each Abstract Syntax Tree (AST) node MUST map to one or more bytecode instructions through a depth-first recursive traversal. The generator MUST NOT skip nodes or reorder evaluation unless explicitly defined by operator precedence in the AST.
+* **14.3 Evaluation Order Guarantee:** Expression evaluation MUST follow the order defined by the AST structure. Operator precedence and associativity are assumed to already be resolved during parsing. The Code Generator MUST NOT re-evaluate or reinterpret precedence rules.
+* **14.4 Variable Access Rules:** Variable reads MUST use the LOAD <name> instruction, and variable writes MUST use the STORE <name> instruction. Any expression assigned to a variable MUST be fully evaluated before the STORE operation is executed.
+* **14.5 Assignment Evaluation Strategy:** Simple assignments (=) MUST evaluate the right-hand side before storing the result. Compound assignments (+=, -=, *=, /=, %=) MUST first load the current variable value, apply the operation, and then store the updated result.
+* **14.6 Control Flow Translation Rules:** Control structures MUST be translated using labels and jump instructions:
+    - if statements MUST use JUMP_IF_FALSE and JUMP instructions with uniquely generated labels.
+    - while loops MUST use a start label, condition check, and end label with backward jumps.
+    - do-while loops MUST execute the body before evaluating the condition.
+    - for loops MUST be decomposed into initialization, condition, update, and body sections with separate labels.
+    - switch statements MUST be translated using a jump table pattern, where each case value is compared using DUP, PUSH_CONST, and EQUAL before jumping to the corresponding case label.
+* **14.7 Label Generation Constraints:** All labels MUST be uniquely generated using an internal counter system. Labels MUST NOT collide across different control structures. Each label MUST clearly represent its purpose (e.g., WHILE_START, IF_END, FOR_CONTINUE).
+* **14.8 Break and Continue Handling:** break and continue statements MUST resolve to the nearest active loop context. The Code Generator MUST maintain internal tracking variables (currentBreakLabel, currentContinueLabel) to ensure correct jump destinations. Usage outside loop contexts MUST trigger a code generation error.
+* **14.9 Logical Operator Short-Circuiting:** Logical operators MUST implement short-circuit evaluation:
+    - && MUST stop evaluation immediately if the left operand is false.
+    - || MUST stop evaluation immediately if the left operand is true.
+    - These MUST be implemented using conditional jump instructions rather than direct computation.
+* **14.10 Method Invocation Rules:** Method calls MUST push all arguments onto the stack in left-to-right order before invocation. The appropriate invocation instruction MUST be selected based on context:
+    - INVOKE_STATIC for static methods
+    - INVOKE_VIRTUAL for instance methods
+    - Return values MUST remain on the stack after execution.
+* **14.11 Object and Array Access Rules:** Object field access MUST use FIELD_LOAD and FIELD_STORE instructions. Array access MUST use ARRAY_LOAD and ARRAY_STORE, where index and reference MUST be evaluated before execution.
+* **14.12 Literal and Constant Handling:** Numeric literals MUST use PUSH, while string, boolean, and null values MUST use PUSH_CONST. All literals MUST be pushed onto the stack before participation in any operation.
+* **14.13 Execution Integrity Rule:** The Code Generator MUST ensure that every emitted instruction corresponds to a valid execution step. The Code Generator MUST NOT generate unreachable or orphaned instructions outside of explicitly defined control flow constructs.
