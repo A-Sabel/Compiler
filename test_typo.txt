@@ -19,6 +19,12 @@ int fibonacci(int n) {
 }
 
 
+int[] numbers = new int[5]; 
+String[] cars = {"Volvo", "BMW", "Ford", "Mazda"};
+
+
+
+
 void process(int count, String name) { }
 
 void main() {
@@ -35,6 +41,31 @@ void badMath() {
 }
 
 
+
+void testArrays(String[] args) {
+    // 1. Test Parameter Access
+    // Since args is String[], args[0] should resolve to String
+    String firstArg = args[0]; 
+    
+    // 2. Test Type Compatibility
+    String[] names = args; // PASS: String[] to String[]
+    
+    // 3. Test Invalid Assignments (Type Mismatch)
+    int bad = args[1]; // ERROR: Cannot assign String to int
+    
+    // 4. Test Index Validation
+    // The index must be an int
+    String secondArg = args[true]; // ERROR: Array index must be int, found boolean
+    
+    // 5. Test Non-Array Access
+    int x = 10;
+    int y = x[0]; // ERROR: The variable is not an array type
+}
+
+void main() {
+    String[] mockArgs = null; // null is compatible with arrays
+    testArrays(mockArgs);
+}
 
 // --- LEVEL 1: The Basics (Simple Variables & Types) ---
 void levelOne() {

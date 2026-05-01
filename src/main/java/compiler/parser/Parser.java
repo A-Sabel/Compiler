@@ -29,14 +29,15 @@ import compiler.util.ErrorHandler;
  *   block          → { statement* }
  *
  *   expr           → assignment
- *   assignment     → identifier (= | += | -= | *= | /=) assignment | logicalOr
+ *   assignment     → identifier (= | += | -= | *= | /= | %=) assignment | ternary
+ *   ternary        → logicalOr ( ? expr : expr )?
  *   logicalOr      → logicalAnd ( || logicalAnd )*
  *   logicalAnd     → equality  ( && equality  )*
  *   equality       → relational ( (== | !=) relational )*
  *   relational     → additive  ( (< | > | <= | >=) additive )*
  *   additive       → multiplicative ( (+ | -) multiplicative )*
- *   multiplicative → unary ( (* | /) unary )*
- *   unary          → (! | - | ++ | --) unary | postfix
+ *   multiplicative → unary ( (* | / | %) unary )*
+ *   unary          → (! | - | ++ | -- | ~) unary | (Type) unary | postfix
  *   postfix        → primary (++ | --)?
  *   primary        → NUMBER | STRING | IDENTIFIER | ( expr )
  */
@@ -62,11 +63,11 @@ public class Parser {
             // 1. Check for Class Declaration (e.g., public class Main)
             if (check("KEYWORD", "class") || (isModifier() && peekIsClass())) {
                 program.addChild(parseClassDecl());
-            } 
-            // 2. Check for Method Declaration (using our new helper)
+            }
+            // 2. Check for Method Declaration
             else if (isMethodStart()) {
                 program.addChild(parseMethodDecl());
-            } 
+            }
             // 3. Fallback to standalone statements (like print or assignments)
             else {
                 ASTNode stmt = parseStatement();
@@ -80,19 +81,29 @@ public class Parser {
     private ASTNode parseMethodDecl() {
         // 1. Parse Modifiers (Optional)
         ASTNode modifiersNode = ASTNode.of("MODIFIERS");
-        while (check("KEYWORD", "public") || check("KEYWORD", "private") || 
-            check("KEYWORD", "protected") || check("KEYWORD", "static")) {
+        while (check("KEYWORD", "public") || check("KEYWORD", "private") ||
+               check("KEYWORD", "protected") || check("KEYWORD", "static")) {
             modifiersNode.addChild(ASTNode.of(currentLexeme()));
             advance();
         }
 
-        // 2. Parse Return Type and Name
-        // Note: If return types can also be arrays, apply the same bracket logic here
-        String returnType = currentLexeme(); advance(); 
-        String methodName = currentLexeme(); advance(); 
+        // 2. Parse Return Type (supports arrays like int[])
+        StringBuilder returnTypeSB = new StringBuilder(currentLexeme());
+        advance(); // consume base return type
+        if (check("SPECIAL_CHAR", "[")) {
+            returnTypeSB.append(currentLexeme()); advance(); // consume '['
+            if (check("SPECIAL_CHAR", "]")) {
+                returnTypeSB.append(currentLexeme()); advance(); // consume ']'
+            }
+        }
+        String returnType = returnTypeSB.toString();
+
+        // 3. Parse Method Name
+        String methodName = currentLexeme();
+        advance();
 
         ASTNode methodNode = ASTNode.of("METHOD_DECL", methodName);
-        
+
         if (!modifiersNode.getChildren().isEmpty()) {
             methodNode.addChild(modifiersNode);
         }
@@ -101,69 +112,73 @@ public class Parser {
 
         consume("SPECIAL_CHAR", "(");
         ASTNode paramsNode = ASTNode.of("PARAMS");
-        
-        // 3. Parse Parameters
+
+        // 4. Parse Parameters
         if (!check("SPECIAL_CHAR", ")")) {
             do {
                 if (isTypeKeyword() || "IDENTIFIER".equals(currentType())) {
-                    // --- THE FIX: Array Support for Parameters ---
                     StringBuilder fullType = new StringBuilder(currentLexeme());
-                    advance(); // Consume base type (e.g., "String")
+                    advance(); // Consume base type
 
-                    // If brackets follow the type, consume them to form the full type name
+                    // Array support: String[]
                     if (check("SPECIAL_CHAR", "[")) {
-                        fullType.append(currentLexeme()); advance(); // Consume "["
+                        fullType.append(currentLexeme()); advance(); // '['
                         if (check("SPECIAL_CHAR", "]")) {
-                            fullType.append(currentLexeme()); advance(); // Consume "]"
+                            fullType.append(currentLexeme()); advance(); // ']'
                         }
                     }
 
-                    // Now the next token must be the identifier (name)
                     if ("IDENTIFIER".equals(currentType())) {
-                        String paramName = currentLexeme(); advance();
-                        
+                        String paramName = currentLexeme();
+                        advance();
                         ASTNode param = ASTNode.of("PARAM");
                         param.addChild(ASTNode.of("TYPE", fullType.toString()));
                         param.addChild(ASTNode.of("NAME", paramName));
                         paramsNode.addChild(param);
                     } else {
-                        ErrorHandler.report("Expected parameter name after type", tokens.get(pos).getLine(), tokens.get(pos).getColumn());
+                        ErrorHandler.report("Expected parameter name after type",
+                            tokens.get(pos).getLine(), tokens.get(pos).getColumn());
                         recover();
                         break;
                     }
                 } else {
-                    ErrorHandler.report("Expected parameter declaration (Type Identifier)", tokens.get(pos).getLine(), tokens.get(pos).getColumn());
+                    ErrorHandler.report("Expected parameter declaration (Type Identifier)",
+                        tokens.get(pos).getLine(), tokens.get(pos).getColumn());
                     recover();
                     break;
                 }
             } while (matchAndAdvance("PUNCTUATION", ","));
         }
         consume("SPECIAL_CHAR", ")");
-        
+
         methodNode.addChild(paramsNode);
-        
-        // 4. Parse the method body
+
+        // 5. Parse the method body
         ASTNode body = parseBlock();
         ASTNode bodyWrapper = ASTNode.of("BODY");
         bodyWrapper.addChild(body);
         methodNode.addChild(bodyWrapper);
-        
+
         return methodNode;
     }
 
-    // Helper method to safely peek 2 or more tokens ahead
+    // ── Helper: peek ahead by offset ──────────────────────────────────────────
+    /**
+     * FIX: Added null-guard on lexeme to prevent NullPointerException when
+     * callers pass null as the lexeme (e.g. checkPeek(2, "IDENTIFIER", null)).
+     * When lexeme is null only the type is checked.
+     */
     private boolean checkPeek(int offset, String type, String lexeme) {
         Tokens t = peek(offset);
         if (t == null) return false;
-        return t.getType().equals(type) && t.getLexeme().equals(lexeme);
+        if (!t.getType().equals(type)) return false;
+        // FIX: if lexeme is null, only type match is required
+        return lexeme == null || lexeme.equals(t.getLexeme());
     }
-    
-    // Helper to check and consume in one step (useful for loops/params)
+
+    // ── Helper: check-and-consume in one step ─────────────────────────────────
     private boolean matchAndAdvance(String type, String lexeme) {
-        if (check(type, lexeme)) {
-            advance();
-            return true;
-        }
+        if (check(type, lexeme)) { advance(); return true; }
         return false;
     }
 
@@ -180,12 +195,12 @@ public class Parser {
         Tokens t = peek(1);
         if (t == null || !"KEYWORD".equals(t.getType())) return false;
         String lex = t.getLexeme();
-        return lex.equals("public") || lex.equals("private") || lex.equals("static") || lex.equals("protected");
+        return lex.equals("public") || lex.equals("private")
+            || lex.equals("static") || lex.equals("protected");
     }
 
     private boolean peekIsClass() {
         Tokens t1 = peek(1);
-        // If current is modifier, check if next is 'class' (e.g., public class)
         return t1 != null && "KEYWORD".equals(t1.getType()) && t1.getLexeme().equals("class");
     }
 
@@ -194,75 +209,39 @@ public class Parser {
     // ═════════════════════════════════════════════════════════════════════════
 
     private ASTNode parseStatement() {
-        // Skip stray semicolons
+        // 1. Skip stray semicolons
         if (check("PUNCTUATION", ";")) { advance(); return null; }
 
-        // Block
+        // 2. Structural Blocks
         if (check("SPECIAL_CHAR", "{")) return parseBlock();
 
-        // if
-        if (check("KEYWORD", "if")) return parseIf();
-
-        // while
-        if (check("KEYWORD", "while")) return parseWhile();
-
-        // do-while
-        if (check("KEYWORD", "do")) return parseDoWhile();
-
-        // for
-        if (check("KEYWORD", "for")) return parseFor();
-
-        // break
-        if (check("KEYWORD", "break")) return parseBreak();
-
-        // continue
-        if (check("KEYWORD", "continue")) return parseContinue();
-
-        // return
-        if (check("KEYWORD", "return")) return parseReturn();
-
-        // switch
-        if (check("KEYWORD", "switch")) return parseSwitch();
-
-        // System.out.println / System.out.print
-        if (isPrintStatement()) return parsePrint();
-
-        // Variable declaration: type identifier ...
-        if (isTypeKeyword() && peekIsIdentifier()) return parseVarDecl();
-        
-        // TYPO CHECK: Detect likely type typos (lowercase identifiers that look like types)
-        if (currentType() != null && currentType().equals("IDENTIFIER") && peekIsIdentifier()) {
-            String possibleType = currentLexeme();
-            String suggestions = suggestTypeTypos(possibleType);
-            if (suggestions != null && !suggestions.isEmpty()) {
-                Tokens t = current();
-                ErrorHandler.report(
-                    "Syntax Error: Unknown type '" + possibleType + "'. Did you mean: " + suggestions + "?",
-                    t.getLine(), t.getColumn());
-                
-                // Error recovery: skip through the declaration/statement
-                advance(); // Skip the misspelled type (e.g., "nt")
-                if (currentType() != null && currentType().equals("IDENTIFIER")) {
-                    advance(); // Skip the variable name (e.g., "a")
-                }
-                if (check("OPERATOR", "=")) {
-                    advance(); // Skip '='
-                    // Skip the initializer expression
-                    while (!isAtEnd() && !check("PUNCTUATION", ";")) {
-                        advance();
-                    }
-                }
-                if (check("PUNCTUATION", ";")) {
-                    advance(); // Skip the semicolon
-                }
-                return null; // Treat as error recovery
+        // 3. Declaration Enforcer
+        if (isTypeKeyword() || isPotentialTypeTypo()) {
+            if (!isTypeKeyword()) {
+                handleTypeTypo();
+                return null;
             }
+            ASTNode decl = parseVarDecl();
+            if (decl == null) recover();
+            return decl;
         }
 
-        // Expression statement
+        // 4. Keywords (Control Flow)
+        if (check("KEYWORD", "if"))       return parseIf();
+        if (check("KEYWORD", "while"))    return parseWhile();
+        if (check("KEYWORD", "do"))       return parseDoWhile();
+        if (check("KEYWORD", "for"))      return parseFor();
+        if (check("KEYWORD", "break"))    return parseBreak();
+        if (check("KEYWORD", "continue")) return parseContinue();
+        if (check("KEYWORD", "return"))   return parseReturn();
+        if (check("KEYWORD", "switch"))   return parseSwitch();
+
+        // 5. System calls
+        if (isPrintStatement()) return parsePrint();
+
+        // 6. Fallback: Expression Statements
         ASTNode expr = parseExpression();
         consumePunctuation(";");
-        // Use expression's coordinates (expr has them from parseExpression)
         ASTNode stmt = ASTNode.of("EXPR_STMT", "", expr.getLine(), expr.getColumn());
         stmt.addChild(expr);
         return stmt;
@@ -288,27 +267,15 @@ public class Parser {
         ASTNode condition = parseExpression();
         consume("SPECIAL_CHAR", ")");
 
-        ASTNode thenBranch;
-        // Check if the next token is a brace
-        if (check("SPECIAL_CHAR", "{")) {
-            thenBranch = parseBlock(); // Parses everything between { and }
-        } else {
-            thenBranch = parseStatement(); // Parses just the next single statement (e.g., return n;)
-        }
+        ASTNode thenBranch = check("SPECIAL_CHAR", "{") ? parseBlock() : parseStatement();
 
         ASTNode ifNode = ASTNode.of("IF_STMT", t.getLine(), t.getColumn());
         ifNode.addChild(wrapAs("CONDITION", condition));
         ifNode.addChild(wrapAs("THEN", thenBranch));
 
-        // Optional: Handle 'else' with the same logic
         if (check("KEYWORD", "else")) {
             advance();
-            ASTNode elseBranch;
-            if (check("SPECIAL_CHAR", "{")) {
-                elseBranch = parseBlock();
-            } else {
-                elseBranch = parseStatement();
-            }
+            ASTNode elseBranch = check("SPECIAL_CHAR", "{") ? parseBlock() : parseStatement();
             ifNode.addChild(wrapAs("ELSE", elseBranch));
         }
 
@@ -323,13 +290,7 @@ public class Parser {
         ASTNode condition = parseExpression();
         consume("SPECIAL_CHAR", ")");
 
-        // --- THE FIX: Brace Check Logic ---
-        ASTNode body;
-        if (check("SPECIAL_CHAR", "{")) {
-            body = parseBlock();
-        } else {
-            body = parseStatement();
-        }
+        ASTNode body = check("SPECIAL_CHAR", "{") ? parseBlock() : parseStatement();
 
         ASTNode whileNode = ASTNode.of("WHILE_STMT", t.getLine(), t.getColumn());
         whileNode.addChild(wrapAs("CONDITION", condition));
@@ -359,60 +320,79 @@ public class Parser {
         consume("KEYWORD", "for");
         consume("SPECIAL_CHAR", "(");
 
-        ASTNode forNode = ASTNode.of("FOR", t.getLine(), t.getColumn());
+        if (isTypeKeyword()) {
+            // FIX: null-check the result of parseVarDeclNoSemiCheck before using it
+            ASTNode varDecl = parseVarDeclNoSemiCheck();
 
-        // Initialization
-        ASTNode init;
-        if (isTypeKeyword() && peekIsIdentifier()) {
-            init = parseVarDeclNoSemiCheck(); 
-        } else {
-            init = parseExpression();
+            // Enhanced for-each: for (Type var : collection)
+            if (check("PUNCTUATION", ":") || check("OPERATOR", ":")) {
+                advance(); // consume ':'
+                ASTNode iterable = parseExpression();
+                consume("SPECIAL_CHAR", ")");
+
+                ASTNode forEachNode = ASTNode.of("FOR_EACH", t.getLine(), t.getColumn());
+                // Wrap safely even if varDecl is null (error already reported)
+                forEachNode.addChild(wrapAs("ITERATOR", varDecl));
+                forEachNode.addChild(wrapAs("COLLECTION", iterable));
+                ASTNode body = check("SPECIAL_CHAR", "{") ? parseBlock() : parseStatement();
+                forEachNode.addChild(wrapAs("BODY", body));
+                return forEachNode;
+            }
+
+            // Standard for loop (init was a declaration)
+            consumePunctuation(";");
+            ASTNode forNode = ASTNode.of("FOR", t.getLine(), t.getColumn());
+            // FIX: wrapAs handles null child safely
+            forNode.addChild(wrapAs("INIT", varDecl));
+
+            ASTNode condition = parseExpression();
+            consumePunctuation(";");
+            forNode.addChild(wrapAs("CONDITION", condition));
+
+            ASTNode update = parseExpression();
+            forNode.addChild(wrapAs("UPDATE", update));
+            consume("SPECIAL_CHAR", ")");
+
+            ASTNode body = check("SPECIAL_CHAR", "{") ? parseBlock() : parseStatement();
+            forNode.addChild(wrapAs("BODY", body));
+            return forNode;
         }
+
+        // Standard for loop (init is an existing variable expression)
+        ASTNode forNode = ASTNode.of("FOR", t.getLine(), t.getColumn());
+        ASTNode init = parseExpression();
         consumePunctuation(";");
         forNode.addChild(wrapAs("INIT", init));
 
-        // Condition
         ASTNode condition = parseExpression();
         consumePunctuation(";");
         forNode.addChild(wrapAs("CONDITION", condition));
 
-        // Update
         ASTNode update = parseExpression();
         forNode.addChild(wrapAs("UPDATE", update));
-
         consume("SPECIAL_CHAR", ")");
 
-        // --- THE FIX: Brace Check Logic ---
-        ASTNode body;
-        if (check("SPECIAL_CHAR", "{")) {
-            body = parseBlock(); // Parses everything between { and }
-        } else {
-            body = parseStatement(); // Parses exactly one statement
-        }
+        ASTNode body = check("SPECIAL_CHAR", "{") ? parseBlock() : parseStatement();
         forNode.addChild(wrapAs("BODY", body));
-
         return forNode;
     }
 
     // ── Return Statement ───────────────────────────────────────────────────────
     private ASTNode parseReturn() {
-        Tokens t = current(); // Coordinates of the 'return' keyword
+        Tokens t = current();
         consume("KEYWORD", "return");
-        
         ASTNode returnNode = ASTNode.of("RETURN", t.getLine(), t.getColumn());
-        
         if (!check("PUNCTUATION", ";")) {
             ASTNode expr = parseExpression();
             if (expr != null) returnNode.addChild(expr);
         }
-        
         consumePunctuation(";");
         return returnNode;
     }
 
     // ── break ──────────────────────────────────────────────────────────────────
     private ASTNode parseBreak() {
-        Tokens t = current(); // Capture 'break' keyword coordinates
+        Tokens t = current();
         consume("KEYWORD", "break");
         consumePunctuation(";");
         return ASTNode.of("BREAK", "", t.getLine(), t.getColumn());
@@ -420,7 +400,7 @@ public class Parser {
 
     // ── continue ───────────────────────────────────────────────────────────────
     private ASTNode parseContinue() {
-        Tokens t = current(); // Capture 'continue' keyword coordinates
+        Tokens t = current();
         consume("KEYWORD", "continue");
         consumePunctuation(";");
         return ASTNode.of("CONTINUE", "", t.getLine(), t.getColumn());
@@ -436,48 +416,40 @@ public class Parser {
 
         ASTNode switchNode = ASTNode.of("SWITCH");
         switchNode.addChild(wrapAs("EXPR", expr));
-        
         ASTNode casesWrapper = ASTNode.of("CASES");
-        
+
         while (!isAtEnd() && !check("SPECIAL_CHAR", "}")) {
             if (check("KEYWORD", "case")) {
                 advance(); // consume 'case'
                 ASTNode caseExpr = parseExpression();
                 consume("PUNCTUATION", ":");
-                
+
                 ASTNode caseNode = ASTNode.of("CASE");
                 caseNode.addChild(caseExpr);
-                
-                // Parse statements until next case/default/closing brace
                 ASTNode caseBody = ASTNode.of("CASE_BODY");
-                while (!isAtEnd() && !check("SPECIAL_CHAR", "}") && 
-                       !check("KEYWORD", "case") && !check("KEYWORD", "default")) {
+                while (!isAtEnd() && !check("SPECIAL_CHAR", "}")
+                       && !check("KEYWORD", "case") && !check("KEYWORD", "default")) {
                     ASTNode stmt = parseStatement();
                     if (stmt != null) caseBody.addChild(stmt);
                 }
                 caseNode.addChild(caseBody);
                 casesWrapper.addChild(caseNode);
-            } 
-            else if (check("KEYWORD", "default")) {
+            } else if (check("KEYWORD", "default")) {
                 advance(); // consume 'default'
                 consume("PUNCTUATION", ":");
-                
                 ASTNode defaultNode = ASTNode.of("DEFAULT");
                 ASTNode defaultBody = ASTNode.of("CASE_BODY");
-                
                 while (!isAtEnd() && !check("SPECIAL_CHAR", "}")) {
                     ASTNode stmt = parseStatement();
                     if (stmt != null) defaultBody.addChild(stmt);
                 }
                 defaultNode.addChild(defaultBody);
                 casesWrapper.addChild(defaultNode);
-            }
-            else {
-                // Skip unexpected tokens in switch
-                advance();
+            } else {
+                advance(); // skip unexpected tokens
             }
         }
-        
+
         consume("SPECIAL_CHAR", "}");
         switchNode.addChild(casesWrapper);
         return switchNode;
@@ -485,19 +457,17 @@ public class Parser {
 
     // ── System.out.println(expr); ─────────────────────────────────────────────
     private ASTNode parsePrint() {
-        Tokens t = current(); // 1. Capture the start token for coordinates
+        Tokens t = current();
         String method;
 
         if (t.getLexeme().equals("System")) {
-            // Handle standard: System.out.println(...)
-            advance(); // System
-            consume("PUNCTUATION", ".");
-            advance(); // out
-            consume("PUNCTUATION", ".");
-            method = currentLexeme(); 
-            advance(); // println or print
+            advance();                   // System
+            consume("PUNCTUATION", "."); // .
+            advance();                   // out
+            consume("PUNCTUATION", "."); // .
+            method = currentLexeme();
+            advance();                   // println / print
         } else {
-            // 2. Handle simplified: print(...) or println(...)
             method = t.getLexeme();
             advance();
         }
@@ -507,13 +477,26 @@ public class Parser {
         consume("SPECIAL_CHAR", ")");
         consumePunctuation(";");
 
-        // 3. FIX: Pass the captured token's line and col to the factory
         ASTNode printNode = ASTNode.of("PRINT_STMT", method, t.getLine(), t.getColumn());
         printNode.addChild(arg);
         return printNode;
     }
 
-    // ── Variable declaration ───────────────────────────────────────────────────
+    // ── Array Literal ──────────────────────────────────────────────────────────
+    private ASTNode parseArrayLiteral() {
+        Tokens startToken = current();
+        consume("SPECIAL_CHAR", "{");
+        ASTNode literalNode = ASTNode.of("ARRAY_LITERAL", "", startToken.getLine(), startToken.getColumn());
+        if (!check("SPECIAL_CHAR", "}")) {
+            do {
+                literalNode.addChild(parseExpression());
+            } while (matchAndAdvance("PUNCTUATION", ","));
+        }
+        consume("SPECIAL_CHAR", "}");
+        return literalNode;
+    }
+
+    // ── Variable Declaration ───────────────────────────────────────────────────
     private ASTNode parseVarDecl() {
         ASTNode node = parseVarDeclNoSemiCheck();
         consumePunctuation(";");
@@ -521,72 +504,71 @@ public class Parser {
     }
 
     private ASTNode parseVarDeclNoSemiCheck() {
-        Tokens typeToken = current(); // 1. Capture the start token (e.g., 'int' or 'String')
-        StringBuilder fullType = new StringBuilder(currentLexeme()); 
-        advance(); 
+        Tokens typeToken = current();
+        StringBuilder fullType = new StringBuilder(currentLexeme());
+        advance();
 
-        // Support for array brackets (e.g., String[])
+        // Array type: String[]
         if (check("SPECIAL_CHAR", "[")) {
-            fullType.append(currentLexeme()); advance(); // Consume '['
+            fullType.append(currentLexeme()); advance(); // '['
             if (check("SPECIAL_CHAR", "]")) {
-                fullType.append(currentLexeme()); advance(); // Consume ']'
+                fullType.append(currentLexeme()); advance(); // ']'
             }
         }
-        
-        String typeName = fullType.toString();
 
-        // Parent node to house all variables in this declaration line
+        if (currentType() != null && currentType().equals("CONSTANT")) {
+            ErrorHandler.report("Syntax Error: A number cannot be used as a variable name.",
+                current().getLine(), current().getColumn());
+            recover();
+            return null;
+        }
+
+        String typeName = fullType.toString();
         ASTNode groupNode = ASTNode.of("VAR_DECL_GROUP", typeToken.getLine(), typeToken.getColumn());
 
         do {
-            Tokens varToken = current(); // 2. Capture coordinates for THIS specific variable name
-            String varName = currentLexeme(); advance();
+            Tokens varToken = current();
+            String varName = currentLexeme();
+            advance();
 
-            // Create a specific declaration node for this identifier
-            ASTNode declNode = ASTNode.of("VAR_DECL", typeName + " " + varName, varToken.getLine(), varToken.getColumn());
-            
-            // Attach the type and name children with precise coordinates
+            ASTNode declNode = ASTNode.of("VAR_DECL", typeName + " " + varName,
+                varToken.getLine(), varToken.getColumn());
             declNode.addChild(ASTNode.of("TYPE", typeName, typeToken.getLine(), typeToken.getColumn()));
             declNode.addChild(ASTNode.of("NAME", varName, varToken.getLine(), varToken.getColumn()));
 
-            // Handle optional initialization for EACH variable (e.g., int x = 5, y = 10;)
             if (check("OPERATOR", "=")) {
-                advance(); 
+                advance();
                 ASTNode init = parseExpression();
                 declNode.addChild(wrapAs("INIT_VALUE", init));
             }
-            
-            groupNode.addChild(declNode);
 
-        } while (matchAndAdvance("PUNCTUATION", ",")); // 3. Continue if there is a comma
+            groupNode.addChild(declNode);
+        } while (matchAndAdvance("PUNCTUATION", ","));
 
         return groupNode;
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    //  EXPRESSION PARSING  (Pratt / recursive-descent by precedence)
+    //  EXPRESSION PARSING  (recursive-descent by precedence)
     // ═════════════════════════════════════════════════════════════════════════
-    // 1. Entry point for all expressions
+
     private ASTNode parseExpression() {
-        return parseAssignment(); 
+        return parseAssignment();
     }
 
-    // 2. Assignment must call Ternary
     private ASTNode parseAssignment() {
-        ASTNode left = parseTernary(); // CHANGED: Now calls ternary instead of logicalOr
+        ASTNode left = parseTernary();
 
-        if (currentType() != null && currentType().equals("OPERATOR") && isAssignmentOp(currentLexeme())) {
-            Tokens opToken = current(); // Grab '=' coordinates
-            String op = currentLexeme(); 
+        if (currentType() != null && currentType().equals("OPERATOR")
+                && isAssignmentOp(currentLexeme())) {
+            Tokens opToken = current();
+            String op = currentLexeme();
             advance();
             ASTNode right = parseAssignment();
-            
-            // Capture the LHS coordinates (variable name) for better error reporting
-            Tokens lhsToken = (left.getType().equals("IDENTIFIER") && left.getLine() > 0) ? 
-                                null : opToken; // Use left's own coords if available, else operator coords
-            int line = (left.getLine() > 0) ? left.getLine() : opToken.getLine();
-            int col = (left.getColumn() > 0) ? left.getColumn() : opToken.getColumn();
-            
+
+            int line = (left.getLine() > 0)   ? left.getLine()   : opToken.getLine();
+            int col  = (left.getColumn() > 0) ? left.getColumn() : opToken.getColumn();
+
             ASTNode assign = ASTNode.of("ASSIGN", op, line, col);
             assign.addChild(left);
             assign.addChild(right);
@@ -596,17 +578,28 @@ public class Parser {
     }
 
     private ASTNode parseTernary() {
-        ASTNode condition = parseLogicalOr(); // The 'a > b' part
+        ASTNode condition = parseLogicalOr();
 
         if (check("OPERATOR", "?")) {
-            Tokens t = current(); // Grab the 'OPERATOR' token
-            advance(); 
-            
+            Tokens t = current();
+            advance(); // consume '?'
+
             ASTNode thenExpr = parseExpression();
-            consume("OPERATOR", ":"); // Matching the lexer classification
+
+            // FIX: The ternary ':' may be classified as OPERATOR or PUNCTUATION
+            // depending on the lexer. Accept both to be safe.
+            if (check("OPERATOR", ":")) {
+                advance();
+            } else if (check("PUNCTUATION", ":")) {
+                advance();
+            } else {
+                ErrorHandler.report("Expected ':' in ternary expression",
+                    current() != null ? current().getLine() : -1,
+                    current() != null ? current().getColumn() : -1);
+            }
+
             ASTNode elseExpr = parseExpression();
-            
-            // Propagate the coordinates to the TERNARY node
+
             ASTNode ternary = ASTNode.of("TERNARY", "?", t.getLine(), t.getColumn());
             ternary.addChild(wrapAs("CONDITION", condition));
             ternary.addChild(wrapAs("THEN", thenExpr));
@@ -670,7 +663,7 @@ public class Parser {
         ASTNode left = parseMultiplicative();
         while (currentType() != null && currentType().equals("OPERATOR")
                && (currentLexeme().equals("+") || currentLexeme().equals("-"))) {
-            Tokens t = current(); // Capture operator coordinates
+            Tokens t = current();
             String op = currentLexeme(); advance();
             ASTNode right = parseMultiplicative();
             ASTNode node = ASTNode.of("BINARY_OP", op, t.getLine(), t.getColumn());
@@ -682,9 +675,9 @@ public class Parser {
 
     private ASTNode parseMultiplicative() {
         ASTNode left = parseUnary();
-        // Added % here to fix the "Expected ')' but found '%'" error
         while (currentType() != null && currentType().equals("OPERATOR")
-               && (currentLexeme().equals("*") || currentLexeme().equals("/") || currentLexeme().equals("%"))) {
+               && (currentLexeme().equals("*") || currentLexeme().equals("/")
+                   || currentLexeme().equals("%"))) {
             Tokens t = current();
             String op = currentLexeme(); advance();
             ASTNode right = parseUnary();
@@ -696,39 +689,58 @@ public class Parser {
     }
 
     private ASTNode parseUnary() {
-        // Type cast: (Type) expr
-        if (check("OPERATOR", "?")) {
-            int savePos = pos;
+        // FIX: Type cast — was incorrectly checking for "?" instead of "(".
+        // Correct heuristic: ( TypeKeyword ) followed by an expression.
+        // Save position so we can backtrack if this turns out not to be a cast.
+        if (check("SPECIAL_CHAR", "(")) {
+            int savedPos = pos;
             advance(); // consume '('
-            consume("OPERATOR", ":");
-            // Try to parse as type
             if (isTypeKeyword()) {
                 String type = currentLexeme();
-                advance();
+                advance(); // consume type name
+                // Optional array brackets in cast: (int[])
+                StringBuilder castType = new StringBuilder(type);
+                if (check("SPECIAL_CHAR", "[")) {
+                    castType.append(currentLexeme()); advance();
+                    if (check("SPECIAL_CHAR", "]")) {
+                        castType.append(currentLexeme()); advance();
+                    }
+                }
                 if (check("SPECIAL_CHAR", ")")) {
                     advance(); // consume ')'
                     ASTNode castExpr = parseUnary();
-                    ASTNode castNode = ASTNode.of("CAST", type);
+                    ASTNode castNode = ASTNode.of("CAST", castType.toString());
                     castNode.addChild(castExpr);
                     return castNode;
                 }
             }
-            
-            // Not a cast, restore position and parse as normal expression
-            pos = savePos;
+            // Not a cast — backtrack and let parsePrimary handle the '('
+            pos = savedPos;
         }
-        
-        // new operator: new ClassName(...)
+
+        // 'new' operator: new ClassName(...) or new type[size]
         if (check("KEYWORD", "new")) {
+            Tokens startToken = current();
             advance(); // consume 'new'
-            String className = currentLexeme();
-            advance(); // consume class name (must be identifier)
-            
-            ASTNode newNode = ASTNode.of("NEW", className);
-            
-            // Optional constructor arguments
+            String typeName = currentLexeme();
+            advance(); // consume type / class name
+
+            // Array instantiation: new int[5]
+            if (check("SPECIAL_CHAR", "[")) {
+                advance(); // consume '['
+                ASTNode sizeExpr = parseExpression();
+                consume("SPECIAL_CHAR", "]");
+                ASTNode newArrayNode = ASTNode.of("NEW_ARRAY", typeName + "[]",
+                    startToken.getLine(), startToken.getColumn());
+                newArrayNode.addChild(sizeExpr);
+                return newArrayNode;
+            }
+
+            // Standard object construction: new ClassName(args)
+            ASTNode newNode = ASTNode.of("NEW", typeName,
+                startToken.getLine(), startToken.getColumn());
             if (check("SPECIAL_CHAR", "(")) {
-                advance();
+                advance(); // consume '('
                 ASTNode args = ASTNode.of("ARGS");
                 while (!isAtEnd() && !check("SPECIAL_CHAR", ")")) {
                     args.addChild(parseExpression());
@@ -737,11 +749,10 @@ public class Parser {
                 consume("SPECIAL_CHAR", ")");
                 newNode.addChild(args);
             }
-            
             return newNode;
         }
-        
-        // Unary operators: !, -, ++, --
+
+        // Prefix unary operators: !, -, ++, --, ~
         if (currentType() != null && currentType().equals("OPERATOR")
             && (currentLexeme().equals("!") || currentLexeme().equals("-")
                 || currentLexeme().equals("++") || currentLexeme().equals("--")
@@ -751,14 +762,15 @@ public class Parser {
             node.addChild(parseUnary());
             return node;
         }
+
         return parsePostfix();
     }
 
-    
     private ASTNode parsePostfix() {
         ASTNode node = parsePrimary();
-        
-        // Handle postfix operators and access operations (loops to handle chaining: arr[i][j], obj.method().arr[i], etc.)
+
+        // FIX: Removed the duplicate array-access branch that was unreachable.
+        // The loop now handles: postfix ++/--, array access [], member access ., method calls.
         while (true) {
             // Postfix ++ and --
             if (currentType() != null && currentType().equals("OPERATOR")
@@ -768,28 +780,29 @@ public class Parser {
                 postfix.addChild(node);
                 node = postfix;
             }
-            // Array access: [expr]
+            // Array access: expr[index]
             else if (check("SPECIAL_CHAR", "[")) {
+                Tokens bracketToken = current();
                 advance(); // consume '['
                 ASTNode index = parseExpression();
                 consume("SPECIAL_CHAR", "]");
-                ASTNode access = ASTNode.of("ARRAY_ACCESS");
+                ASTNode access = ASTNode.of("ARRAY_ACCESS", "",
+                    bracketToken.getLine(), bracketToken.getColumn());
                 access.addChild(node);
                 access.addChild(index);
                 node = access;
             }
-            // Member access: .member or .method()
+            // Member access: expr.member or expr.method(args)
             else if (check("PUNCTUATION", ".")) {
                 advance(); // consume '.'
                 String member = currentLexeme();
                 advance(); // consume member name
-                
-                // Check if it's a method call
+
                 if (check("SPECIAL_CHAR", "(")) {
+                    // Method call on object
                     advance(); // consume '('
                     ASTNode methodCall = ASTNode.of("METHOD_CALL", member);
-                    methodCall.addChild(node); // Add the object/instance
-                    
+                    methodCall.addChild(node); // receiver object
                     ASTNode args = ASTNode.of("ARGS");
                     while (!isAtEnd() && !check("SPECIAL_CHAR", ")")) {
                         args.addChild(parseExpression());
@@ -799,42 +812,35 @@ public class Parser {
                     methodCall.addChild(args);
                     node = methodCall;
                 } else {
-                    // Member field access
+                    // Field access
                     ASTNode fieldAccess = ASTNode.of("FIELD_ACCESS", member);
                     fieldAccess.addChild(node);
                     node = fieldAccess;
                 }
             }
-            else if (check("SPECIAL_CHAR", "[")) {
-                Tokens openBracket = current(); // Capture the '[' token
-                advance(); 
-                ASTNode index = parseExpression();
-                consume("SPECIAL_CHAR", "]");
-                
-                // Pass the coordinates to the node
-                ASTNode access = ASTNode.of("ARRAY_ACCESS", "", openBracket.getLine(), openBracket.getColumn());
-                access.addChild(node);
-                access.addChild(index);
-                node = access;
-            }
             else {
                 break;
             }
         }
-        
+
         return node;
     }
 
     private ASTNode parsePrimary() {
-        Tokens t = current(); // 1. Capture token immediately for line/col tracking
+        Tokens t = current();
         if (t == null || isAtEnd()) {
             ErrorHandler.report("Unexpected end of input in expression", -1, -1);
             return ASTNode.of("ERROR");
         }
 
-        String type = t.getType(); // Use getType() to avoid reflection/SPECIALCHAR bug
+        // Array literal: { expr, expr, ... }
+        if (check("SPECIAL_CHAR", "{")) {
+            return parseArrayLiteral();
+        }
 
-        // ── Grouped Expression: ( expr ) ──
+        String type = t.getType();
+
+        // Grouped expression: ( expr )
         if (type.equals("SPECIAL_CHAR") && t.getLexeme().equals("(")) {
             advance();
             ASTNode inner = parseExpression();
@@ -842,93 +848,81 @@ public class Parser {
             return inner;
         }
 
-        // ── Identifier or Method Call ──
+        // Identifier or direct method call
         if (type.equals("IDENTIFIER")) {
             String name = currentLexeme();
             advance();
-            
-            // Check for direct method call: name(args)
             if (check("SPECIAL_CHAR", "(")) {
-                return parseMethodCall(name, null); 
+                return parseMethodCall(name, null);
             }
-            
             return ASTNode.of("IDENTIFIER", name, t.getLine(), t.getColumn());
         }
 
-        // ── Number Constant ──
+        // Number constant
         if (type.equals("CONSTANT")) {
-            String val = currentLexeme();
-            advance();
+            String val = currentLexeme(); advance();
             return ASTNode.of("NUMBER", val, t.getLine(), t.getColumn());
         }
 
-        // ── String / Char Literals ──
+        // String / char literals
         if (type.equals("LITERAL")) {
-            String val = currentLexeme();
-            advance();
+            String val = currentLexeme(); advance();
             return ASTNode.of("LITERAL", val, t.getLine(), t.getColumn());
         }
 
-        // ── Boolean / Null Keywords ──
-        if (type.equals("KEYWORD") && (t.getLexeme().equals("true") || 
-            t.getLexeme().equals("false") || t.getLexeme().equals("null"))) {
-            String val = currentLexeme();
-            advance();
+        // Boolean / null keywords
+        if (type.equals("KEYWORD") && (t.getLexeme().equals("true")
+                || t.getLexeme().equals("false") || t.getLexeme().equals("null"))) {
+            String val = currentLexeme(); advance();
             return ASTNode.of("LITERAL", val, t.getLine(), t.getColumn());
         }
 
-        // ── Fallback: Error Handling ──
+        // Fallback error
         String bad = currentLexeme();
         ErrorHandler.report("Unexpected token in expression: " + bad, t.getLine(), t.getColumn());
         advance();
         return ASTNode.of("ERROR", bad, t.getLine(), t.getColumn());
     }
 
+    // ── Class Declaration ──────────────────────────────────────────────────────
     private ASTNode parseClassDecl() {
         Tokens startToken = current();
-        
-        // 1. Parse Modifiers (public, static, etc.)
+
         ASTNode modifiers = ASTNode.of("MODIFIERS");
         while (isModifier()) {
             modifiers.addChild(ASTNode.of(currentLexeme()));
             advance();
         }
 
-        // 2. Consume 'class' and the Class Name
         consume("KEYWORD", "class");
         String className = currentLexeme();
         consume("IDENTIFIER", className);
 
-        ASTNode classNode = ASTNode.of("CLASS_DECL", className, startToken.getLine(), startToken.getColumn());
+        ASTNode classNode = ASTNode.of("CLASS_DECL", className,
+            startToken.getLine(), startToken.getColumn());
         if (!modifiers.getChildren().isEmpty()) classNode.addChild(modifiers);
 
-        // 3. Parse the Class Body { ... }
         consume("SPECIAL_CHAR", "{");
         ASTNode body = ASTNode.of("CLASS_BODY");
         while (!isAtEnd() && !check("SPECIAL_CHAR", "}")) {
-            // Inside a class, we expect methods or field declarations
             if (isMethodStart()) {
                 body.addChild(parseMethodDecl());
             } else {
-                ASTNode field = parseStatement(); // Handles fields like 'int x = 10;'
+                ASTNode field = parseStatement();
                 if (field != null) body.addChild(field);
             }
         }
         consume("SPECIAL_CHAR", "}");
-        
+
         classNode.addChild(body);
         return classNode;
     }
 
     // ── Method Invocation ──────────────────────────────────────────────────────
     private ASTNode parseMethodCall(String methodName, ASTNode receiver) {
-        // 1. Capture the current coordinate (the '(' token)
-        Tokens t = current(); 
-        
-        // 2. Pass coordinates to the factory
+        Tokens t = current();
         ASTNode methodCallNode = ASTNode.of("METHOD_CALL", methodName, t.getLine(), t.getColumn());
-        
-        // Add RECEIVER node if it's a member call (e.g., math.max)
+
         if (receiver != null) {
             ASTNode receiverNode = ASTNode.of("RECEIVER", t.getLine(), t.getColumn());
             receiverNode.addChild(receiver);
@@ -936,21 +930,16 @@ public class Parser {
         }
 
         consume("SPECIAL_CHAR", "(");
-        
-        // Ensure the ARGS wrapper also has a "birth certificate"
         ASTNode argsNode = ASTNode.of("ARGS", t.getLine(), t.getColumn());
-        
-        // Parse arguments if parenthesis is not immediately closed
+
         if (!check("SPECIAL_CHAR", ")")) {
             do {
-                ASTNode argExpr = parseExpression(); // Calls your main expression parser
-                if (argExpr != null) {
-                    argsNode.addChild(argExpr);
-                }
+                ASTNode argExpr = parseExpression();
+                if (argExpr != null) argsNode.addChild(argExpr);
             } while (matchAndAdvance("PUNCTUATION", ","));
         }
+
         consume("SPECIAL_CHAR", ")");
-        
         methodCallNode.addChild(argsNode);
         return methodCallNode;
     }
@@ -960,29 +949,29 @@ public class Parser {
     // ═════════════════════════════════════════════════════════════════════════
 
     private boolean isMethodStart() {
-    // Case 1: Starts with a modifier (public, private, static, etc.)
-    if (isModifier()) {
-        // Look ahead to see if it's followed by a type and name: Modifier Type Name (
-        if (peekIsType() && checkPeek(2, "IDENTIFIER", null) && checkPeek(3, "SPECIAL_CHAR", "(")) {
-            return true;
+        // Case 1: starts with a modifier (public, private, static, protected)
+        if (isModifier()) {
+            if (peekIsType() && checkPeek(2, "IDENTIFIER", null) && checkPeek(3, "SPECIAL_CHAR", "(")) {
+                return true;
+            }
+            if (peekIsModifier()) {
+                return true;
+            }
         }
-        // Handles cases with multiple modifiers: public static ...
-        if (peekIsModifier()) {
-            return true; 
+        // Case 2: starts directly with a return type: int calculate(
+        else if (isTypeKeyword()) {
+            // FIX: Use getType() via checkPeek instead of the broken reflection-based peekIsIdentifier()
+            if (checkPeek(1, "IDENTIFIER", null) && checkPeek(2, "SPECIAL_CHAR", "(")) {
+                return true;
+            }
         }
-    } 
-    // Case 2: Starts directly with a type: int calculate(
-    else if (isTypeKeyword()) {
-        if (peekIsIdentifier() && checkPeek(2, "SPECIAL_CHAR", "(")) {
-            return true;
-        }
+        return false;
     }
-    return false;
-}
 
     private boolean isAtEnd() { return pos >= tokens.size(); }
 
     private Tokens current()  { return isAtEnd() ? null : tokens.get(pos); }
+
     private Tokens peek(int offset) {
         int idx = pos + offset;
         return (idx >= tokens.size()) ? null : tokens.get(idx);
@@ -990,7 +979,7 @@ public class Parser {
 
     private String currentType() {
         Tokens t = current();
-        return t == null ? null : t.getType(); 
+        return t == null ? null : t.getType();
     }
 
     private String currentLexeme() {
@@ -1011,30 +1000,23 @@ public class Parser {
         int col  = t != null ? t.getColumn() : -1;
         ErrorHandler.report(
             "Expected '" + lexeme + "' but found '" + currentLexeme() + "'", line, col);
-        
-        // Error recovery: skip to next safe token
         recover();
     }
-    
+
     /**
-     * Panic mode recovery: skip tokens until reaching a synchronization point.
-     * Safe synchronization points: semicolon, closing brace, closing paren.
+     * Panic-mode recovery: skip tokens until a safe synchronisation point.
      */
     private void recover() {
         while (!isAtEnd()) {
-            // Synchronization points where parsing can resume
-            if (check("PUNCTUATION", ";")) {
-                advance();
-                return;
+            if (check("PUNCTUATION", ";")) { advance(); return; }
+            if (check("SPECIAL_CHAR", "}")) { return; }
+            if (currentType() != null && currentType().equals("KEYWORD")) {
+                String lex = currentLexeme();
+                if (lex.equals("if") || lex.equals("for") || lex.equals("while")
+                        || lex.equals("int") || lex.equals("String") || lex.equals("return")) {
+                    return;
+                }
             }
-            if (check("SPECIAL_CHAR", "}") || check("SPECIAL_CHAR", ")")) {
-                return; // Don't consume; let parent context handle it
-            }
-            if (check("SPECIAL_CHAR", "{")) {
-                return; // Let parent handle block
-            }
-            
-            // Skip this token and continue
             advance();
         }
     }
@@ -1043,9 +1025,12 @@ public class Parser {
         consume("PUNCTUATION", lexeme);
     }
 
+    /**
+     * FIX: Added %= to the set of recognised compound-assignment operators.
+     */
     private boolean isAssignmentOp(String op) {
-        return op.equals("=") || op.equals("+=") || op.equals("-=")
-            || op.equals("*=") || op.equals("/=");
+        return op.equals("=")  || op.equals("+=") || op.equals("-=")
+            || op.equals("*=") || op.equals("/=") || op.equals("%=");
     }
 
     private boolean isRelationalOp(String op) {
@@ -1053,30 +1038,27 @@ public class Parser {
     }
 
     /**
-     * Suggests type names similar to a misspelled identifier using edit distance.
-     * Returns comma-separated suggestions or null if no close matches found.
+     * Suggests type names similar to a misspelled identifier using Levenshtein distance.
      */
     private String suggestTypeTypos(String input) {
-        String[] validTypes = {"int", "double", "float", "boolean", "char", "void", "String", "var", "long", "short", "byte"};
+        String[] validTypes = {
+            "int", "double", "float", "boolean", "char",
+            "void", "String", "var", "long", "short", "byte"
+        };
         java.util.List<String> suggestions = new java.util.ArrayList<>();
-        
         for (String validType : validTypes) {
-            if (editDistance(input, validType) <= 1) {
-                suggestions.add(validType);
-            }
+            if (editDistance(input, validType) <= 1) suggestions.add(validType);
         }
-        
         return suggestions.isEmpty() ? null : String.join(", ", suggestions);
     }
-    
+
     /**
-     * Levenshtein distance: measures the minimum edits to transform one string to another.
+     * Levenshtein distance between two strings.
      */
     private int editDistance(String a, String b) {
         int[][] dp = new int[a.length() + 1][b.length() + 1];
         for (int i = 0; i <= a.length(); i++) dp[i][0] = i;
         for (int j = 0; j <= b.length(); j++) dp[0][j] = j;
-        
         for (int i = 1; i <= a.length(); i++) {
             for (int j = 1; j <= b.length(); j++) {
                 if (a.charAt(i - 1) == b.charAt(j - 1)) {
@@ -1091,75 +1073,86 @@ public class Parser {
 
     private boolean isTypeKeyword() {
         String type = currentType();
-        String lex = currentLexeme();
+        String lex  = currentLexeme();
 
-        boolean isBaseType = false;
-        
-        // 1. Check if it's a primitive keyword (int, double, void, etc.) or reference type (String)
         if ("KEYWORD".equals(type)) {
             return lex.equals("int") || lex.equals("double") || lex.equals("float")
-                || lex.equals("boolean") || lex.equals("char") || lex.equals("void") 
+                || lex.equals("boolean") || lex.equals("char") || lex.equals("void")
                 || lex.equals("var") || lex.equals("String");
         }
-        
-        // 2. DYNAMIC CHECK: If it's an Identifier starting with an Uppercase letter,
-        // we treat it as a Reference Type (like MyClass, etc.)
+
+        // Uppercase-initial IDENTIFIER treated as a reference type (e.g. MyClass, String[])
         if ("IDENTIFIER".equals(type) && !lex.isEmpty() && Character.isUpperCase(lex.charAt(0))) {
-            isBaseType = true;
+            return true;
         }
 
-        if (isBaseType) {
-                Tokens next = peek(1);
-                Tokens next2 = peek(2);
-                if (next != null && next.getLexeme().equals("[") && 
-                    next2 != null && next2.getLexeme().equals("]")) {
-                    return true; // It's an array type like String[]
-                }
-                return true; // It's a standard type
-            }
-    return false;
+        return false;
     }
 
     private boolean isModifier() {
         String lex = currentLexeme();
-        return lex.equals("public") || lex.equals("private") || lex.equals("static") || lex.equals("protected");
-    }
-
-    private boolean peekIsIdentifier() {
-        Tokens next = peek(1);
-        return next != null && next.getClass().getSimpleName().equalsIgnoreCase("IDENTIFIER");
+        return lex.equals("public") || lex.equals("private")
+            || lex.equals("static") || lex.equals("protected");
     }
 
     private boolean isPrintStatement() {
-        // Heuristic: Check for standalone 'print', 'println', or 'printf'
         Tokens t0 = peek(0);
-        if (t0 != null && (t0.getLexeme().equals("print") || 
-            t0.getLexeme().equals("println") || 
-            t0.getLexeme().equals("printf"))) {
+        if (t0 != null && (t0.getLexeme().equals("print")
+                || t0.getLexeme().equals("println")
+                || t0.getLexeme().equals("printf"))) {
             return true;
         }
-
-        // Heuristic: IDENTIFIER "System" followed by "." "out" "." "println"/"print"
         Tokens t1 = peek(1), t2 = peek(2), t3 = peek(3), t4 = peek(4);
-
         if (t0 == null || !t0.getLexeme().equals("System")) return false;
         if (t1 == null || !t1.getLexeme().equals("."))      return false;
         if (t2 == null || !t2.getLexeme().equals("out"))    return false;
         if (t3 == null || !t3.getLexeme().equals("."))      return false;
         if (t4 == null) return false;
-        
         return t4.getLexeme().equals("println") || t4.getLexeme().equals("print");
     }
 
-    /** Wraps an existing node inside a labeled wrapper (e.g. CONDITION, THEN, BODY). */
+    /**
+     * Wraps an existing node inside a labelled wrapper (e.g. CONDITION, THEN, BODY).
+     * FIX: Handles null child gracefully — returns an empty wrapper instead of NPE-ing.
+     */
     private ASTNode wrapAs(String label, ASTNode child) {
         if (child == null) return ASTNode.of(label);
-        // FORCE the wrapper to take the child's identity
-        int line = child.getLine();
-        int col = child.getColumn();
-        
-        ASTNode wrapper = ASTNode.of(label, line, col);
+        ASTNode wrapper = ASTNode.of(label, child.getLine(), child.getColumn());
         wrapper.addChild(child);
         return wrapper;
+    }
+
+    /**
+     * Returns true when two consecutive IDENTIFIERs appear, suggesting a misspelled type.
+     */
+    private boolean isPotentialTypeTypo() {
+        Tokens current = current();
+        Tokens next    = peek(1);
+        return current != null && current.getType().equals("IDENTIFIER")
+            && next    != null && "IDENTIFIER".equals(next.getType());
+    }
+
+    /**
+     * Reports a helpful error for a misspelled type and skips the bad tokens.
+     */
+    private void handleTypeTypo() {
+        String possibleType = currentLexeme();
+        String suggestions  = suggestTypeTypos(possibleType);
+        Tokens t = current();
+
+        if (suggestions != null && !suggestions.isEmpty()) {
+            ErrorHandler.report(
+                "Syntax Error: Unknown type '" + possibleType + "'. Did you mean: " + suggestions + "?",
+                t.getLine(), t.getColumn());
+        } else {
+            ErrorHandler.report(
+                "Syntax Error: Unexpected identifier '" + possibleType + "'.",
+                t.getLine(), t.getColumn());
+        }
+
+        advance(); // skip misspelled type
+        if (currentType() != null && currentType().equals("IDENTIFIER")) {
+            advance(); // skip variable name
+        }
     }
 }
