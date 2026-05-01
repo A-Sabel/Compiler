@@ -125,12 +125,12 @@ Certain mathematical operations are fundamentally illegal and must be caught dur
 
 
 ### 16. Constant Pool & Memory Optimization
-*   **16.1 Literal Deduplication:** The Code Generator MUST NOT embed large literals (Strings, Classes, long constants) directly in the instruction stream[cite: 1]. These MUST be moved to a central Constant Pool[cite: 1].
-*   **16.2 LDC Instruction Usage:** Access to the Constant Pool MUST use the `LDC` (Load Constant) instruction family, referencing entries by their pool index rather than their raw value[cite: 1].
-*   **16.3 String Interning:** All unique string literals encountered during generation MUST be interned within the Constant Pool to ensure that identical strings share the same memory address[cite: 1].
+*   **16.1 Literal Deduplication:** The Code Generator MUST NOT embed large literals (Strings, Classes, long constants) directly in the instruction stream. These MUST be moved to a central Constant Pool.
+*   **16.2 LDC Instruction Usage:** Access to the Constant Pool MUST use the `LDC` (Load Constant) instruction family, referencing entries by their pool index rather than their raw value.
+*   **16.3 String Interning:** All unique string literals encountered during generation MUST be interned within the Constant Pool to ensure that identical strings share the same memory address.
 
 ### 17. Type-Specific Opcode Selection
-*   **17.1 Type-Prefixing Mandatory:** The generic opcodes defined in Phase 4 (ADD, LOAD, STORE) MUST be replaced with type-prefixed versions[cite: 1]. The generator MUST select the prefix based on the type resolved during Semantic Analysis[cite: 1]:
+*   **17.1 Type-Prefixing Mandatory:** The generic opcodes defined in Phase 4 (ADD, LOAD, STORE) MUST be replaced with type-prefixed versions. The generator MUST select the prefix based on the type resolved during Semantic Analysis:
     *   `i` for `int`, `boolean`, `byte`, `short`, `char`
     *   `l` for `long`
     *   `f` for `float`
@@ -146,8 +146,6 @@ Certain mathematical operations are fundamentally illegal and must be caught dur
 ### 19. Advanced Arithmetic & Conversion
 *   **19.1 Explicit Conversion Instructions:** When the Semantic Analyzer identifies an implicit widening (e.g., `int` to `double`), the Code Generator MUST emit an explicit conversion instruction (e.g., `I2D`) to maintain stack type-safety.
 *   **19.2 Precision Management:** Operations involving floating-point numbers MUST follow strict IEEE 754 rules, ensuring that `fadd` and `dadd` are used correctly based on the required precision.
-
-Beyond the resource management and type-safety rules already established, a professional compiler must bridge the gap between "working logic" and "production-ready execution." These additional specifications focus on performance optimization, debugging integration, and the implicit lifecycle of a program.
 
 ---
 
@@ -187,43 +185,40 @@ Beyond the resource management and type-safety rules already established, a prof
 
 ## Part VII: Bytecode Optimization
 
-Professional compilers rarely emit the first version of the code they generate.[cite: 1] They run an optimization pass to make the execution faster and smaller.[cite: 1]
-
 ### 24. Static Optimization Rules
-*   **24.1 Constant Folding:** If an expression consists entirely of constants (e.g., `5 + 10 * 2`), the compiler MUST evaluate it during the compilation phase and emit a single `PUSH 25` instruction instead of multiple arithmetic operations.[cite: 1]
-*   **24.2 Constant Propagation:** If a variable is assigned a constant value and never modified before its next use, the compiler SHOULD replace the `LOAD <name>` instruction with a direct `PUSH` of that constant.[cite: 1]
-*   **24.3 Dead Code Elimination:** The compiler MUST identify and remove code that cannot be reached (e.g., code after a `return` or inside an `if(false)` block) to reduce the final binary size.[cite: 1]
+*   **24.1 Constant Folding:** If an expression consists entirely of constants (e.g., `5 + 10 * 2`), the compiler MUST evaluate it during the compilation phase and emit a single `PUSH 25` instruction instead of multiple arithmetic operations.
+*   **24.2 Constant Propagation:** If a variable is assigned a constant value and never modified before its next use, the compiler SHOULD replace the `LOAD <name>` instruction with a direct `PUSH` of that constant.
+*   **24.3 Dead Code Elimination:** The compiler MUST identify and remove code that cannot be reached (e.g., code after a `return` or inside an `if(false)` block) to reduce the final binary size.
 
 ### 25. Peephole Optimization
-*   **25.1 Redundant Instruction Removal:** The optimizer MUST look for and remove "neutral" instruction sequences, such as:[cite: 1]
-    *   `STORE x` immediately followed by `LOAD x` (replace with `DUP, STORE x`).[cite: 1]
-    *   `ADD` where one operand is `0`.[cite: 1]
-    *   `MUL` where one operand is `1`.[cite: 1]
-*   **25.2 Jump-to-Jump Optimization:** If a `JUMP` instruction targets a label that contains only another `JUMP`, the first instruction SHOULD be updated to target the final destination directly.[cite: 1]
+*   **25.1 Redundant Instruction Removal:** The optimizer MUST look for and remove "neutral" instruction sequences, such as:
+    *   `STORE x` immediately followed by `LOAD x` (replace with `DUP, STORE x`).
+    *   `ADD` where one operand is `0`.
+    *   `MUL` where one operand is `1`.
+*   **25.2 Jump-to-Jump Optimization:** If a `JUMP` instruction targets a label that contains only another `JUMP`, the first instruction SHOULD be updated to target the final destination directly.
 
 ---
 
-## Part VII: Runtime & Virtual Machine (VM) Specifications
+## Part VIII: Runtime & Virtual Machine (VM) Specifications
 
-Your instructions need an engine to breathe life into them.[cite: 1] You need a specification for the "Virtual Machine" that will execute the `Instruction` list.[cite: 1]
+Your instructions need an engine to breathe life into them. You need a specification for the "Virtual Machine" that will execute the `Instruction` list.
 
 ### 26. The Execution Engine
-*   **26.1 Operand Stack Integrity:** The VM MUST throw a `StackOverflowError` if the stack exceeds the `MaxStack` calculated in Phase 4, and a `StackUnderflowError` if an instruction attempts to pop from an empty stack.[cite: 1]
-*   **26.2 Local Variable Array:** The VM MUST maintain a fixed-size array for each method frame to store local variables, indexed by the "slots" assigned during Code Generation.[cite: 1]
-*   **26.3 Program Counter (PC):** The VM MUST maintain a `PC` that points to the current instruction.[cite: 1] Jumps MUST be implemented by updating the `PC` to the index of the target `LABEL`.[cite: 1]
+*   **26.1 Operand Stack Integrity:** The VM MUST throw a `StackOverflowError` if the stack exceeds the `MaxStack` calculated in Phase 4, and a `StackUnderflowError` if an instruction attempts to pop from an empty stack.
+*   **26.2 Local Variable Array:** The VM MUST maintain a fixed-size array for each method frame to store local variables, indexed by the "slots" assigned during Code Generation.
+*   **26.3 Program Counter (PC):** The VM MUST maintain a `PC` that points to the current instruction.Jumps MUST be implemented by updating the `PC` to the index of the target `LABEL`.
 
 ### 27. Standard Library (Built-in Functions)
-*   **27.1 System Interop:** The compiler MUST provide a set of pre-defined method signatures for basic I/O (e.g., `print`, `println`, `readInt`).[cite: 1]
-*   **27.2 Native Method Mapping:** Instructions like `PRINT` MUST map directly to the host language's standard output (e.g., `System.out.println` in Java).[cite: 1]
-
+*   **27.1 System Interop:** The compiler MUST provide a set of pre-defined method signatures for basic I/O (e.g., `print`, `println`, `readInt`).
+*   **27.2 Native Method Mapping:** Instructions like `PRINT` MUST map directly to the host language's standard output (e.g., `System.out.println` in Java).
 ---
 
-## Part VIII: Debugging & Metadata
+## Part IX: Debugging & Metadata
 
 ### 28. Line Number Mapping
-*   **28.1 Source Mapping:** The compiler SHOULD generate a `LineNumberTable` that maps bytecode offsets to original source code line numbers.[cite: 1]
-*   **28.2 Error Reporting (Runtime):** If a runtime error occurs (like division by zero), the VM MUST use the `LineNumberTable` to report the error's location in the user's original `.java` or `.txt` file rather than just the bytecode index.[cite: 1]
+*   **28.1 Source Mapping:** The compiler SHOULD generate a `LineNumberTable` that maps bytecode offsets to original source code line numbers.
+*   **28.2 Error Reporting (Runtime):** If a runtime error occurs (like division by zero), the VM MUST use the `LineNumberTable` to report the error's location in the user's original `.java` or `.txt` file rather than just the bytecode index.
 
 ### 29. Symbol Export
-*   **29.1 AST Visualization:** For grading and debugging, the compiler MUST support exporting the AST into a structured format (like JSON or a `.dot` file for Graphviz).[cite: 1]
-*   **29.2 Bytecode Disassembler:** The compiler SHOULD include a utility to print the generated `List<Instruction>` in a human-readable "assembly" format, similar to the `javap` tool.[cite: 1]
+*   **29.1 AST Visualization:** For grading and debugging, the compiler MUST support exporting the AST into a structured format (like JSON or a `.dot` file for Graphviz).
+*   **29.2 Bytecode Disassembler:** The compiler SHOULD include a utility to print the generated `List<Instruction>` in a human-readable "assembly" format, similar to the `javap` tool.
