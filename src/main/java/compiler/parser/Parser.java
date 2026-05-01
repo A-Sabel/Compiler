@@ -79,15 +79,20 @@ public class Parser {
 
     // ── Method Declaration ─────────────────────────────────────────────────────
     private ASTNode parseMethodDecl() {
-        // 1. Parse Modifiers (Optional)
-        ASTNode modifiersNode = ASTNode.of("MODIFIERS");
+        // 1. Capture the start token immediately for the METHOD_DECL node
+        Tokens startToken = current(); 
+        
+        // 2. Parse Modifiers (Optional) - Share startToken coordinates
+        ASTNode modifiersNode = ASTNode.of("MODIFIERS", startToken.getLine(), startToken.getColumn());
         while (check("KEYWORD", "public") || check("KEYWORD", "private") ||
-               check("KEYWORD", "protected") || check("KEYWORD", "static")) {
-            modifiersNode.addChild(ASTNode.of(currentLexeme()));
+            check("KEYWORD", "protected") || check("KEYWORD", "static")) {
+            Tokens modToken = current();
+            modifiersNode.addChild(ASTNode.of(currentLexeme(), modToken.getLine(), modToken.getColumn()));
             advance();
         }
 
-        // 2. Parse Return Type (supports arrays like int[])
+        // 3. Parse Return Type (supports arrays like int[])
+        Tokens returnTypeToken = current(); // Capture for RETURN_TYPE node
         StringBuilder returnTypeSB = new StringBuilder(currentLexeme());
         advance(); // consume base return type
         if (check("SPECIAL_CHAR", "[")) {
@@ -98,24 +103,27 @@ public class Parser {
         }
         String returnType = returnTypeSB.toString();
 
-        // 3. Parse Method Name
+        // 4. Parse Method Name
         String methodName = currentLexeme();
         advance();
 
-        ASTNode methodNode = ASTNode.of("METHOD_DECL", methodName);
+        // FIX: Provide startToken coordinates to the METHOD_DECL node
+        ASTNode methodNode = ASTNode.of("METHOD_DECL", methodName, startToken.getLine(), startToken.getColumn());
 
         if (!modifiersNode.getChildren().isEmpty()) {
             methodNode.addChild(modifiersNode);
         }
 
-        methodNode.addChild(ASTNode.of("RETURN_TYPE", returnType));
+        methodNode.addChild(ASTNode.of("RETURN_TYPE", returnType, returnTypeToken.getLine(), returnTypeToken.getColumn()));
 
+        Tokens openParen = current(); // Capture '(' for PARAMS coordinates
         consume("SPECIAL_CHAR", "(");
-        ASTNode paramsNode = ASTNode.of("PARAMS");
+        ASTNode paramsNode = ASTNode.of("PARAMS", openParen.getLine(), openParen.getColumn());
 
-        // 4. Parse Parameters
+        // 5. Parse Parameters
         if (!check("SPECIAL_CHAR", ")")) {
             do {
+                Tokens paramStart = current(); // Capture start of each parameter[cite: 1]
                 if (isTypeKeyword() || "IDENTIFIER".equals(currentType())) {
                     StringBuilder fullType = new StringBuilder(currentLexeme());
                     advance(); // Consume base type
@@ -131,9 +139,9 @@ public class Parser {
                     if ("IDENTIFIER".equals(currentType())) {
                         String paramName = currentLexeme();
                         advance();
-                        ASTNode param = ASTNode.of("PARAM");
-                        param.addChild(ASTNode.of("TYPE", fullType.toString()));
-                        param.addChild(ASTNode.of("NAME", paramName));
+                        ASTNode param = ASTNode.of("PARAM", paramStart.getLine(), paramStart.getColumn());
+                        param.addChild(ASTNode.of("TYPE", fullType.toString(), paramStart.getLine(), paramStart.getColumn()));
+                        param.addChild(ASTNode.of("NAME", paramName, tokens.get(pos-1).getLine(), tokens.get(pos-1).getColumn()));
                         paramsNode.addChild(param);
                     } else {
                         ErrorHandler.report("Expected parameter name after type",
@@ -153,9 +161,12 @@ public class Parser {
 
         methodNode.addChild(paramsNode);
 
-        // 5. Parse the method body
+        // 6. Parse the method body
+        Tokens braceToken = current(); // Capture '{' for BODY wrapper[cite: 1]
         ASTNode body = parseBlock();
-        ASTNode bodyWrapper = ASTNode.of("BODY");
+        
+        // FIX: Provide coordinates for the BODY wrapper to solve the "Missing Return" coord bug[cite: 1]
+        ASTNode bodyWrapper = ASTNode.of("BODY", braceToken.getLine(), braceToken.getColumn());
         bodyWrapper.addChild(body);
         methodNode.addChild(bodyWrapper);
 
@@ -689,15 +700,16 @@ public class Parser {
     }
 
     private ASTNode parseUnary() {
-        // FIX: Type cast — was incorrectly checking for "?" instead of "(".
-        // Correct heuristic: ( TypeKeyword ) followed by an expression.
-        // Save position so we can backtrack if this turns out not to be a cast.
+        // 1. Type cast: (Type) expr
         if (check("SPECIAL_CHAR", "(")) {
+            Tokens startToken = current(); // Capture '(' coordinates
             int savedPos = pos;
             advance(); // consume '('
+            
             if (isTypeKeyword()) {
                 String type = currentLexeme();
                 advance(); // consume type name
+                
                 // Optional array brackets in cast: (int[])
                 StringBuilder castType = new StringBuilder(type);
                 if (check("SPECIAL_CHAR", "[")) {
@@ -706,10 +718,15 @@ public class Parser {
                         castType.append(currentLexeme()); advance();
                     }
                 }
+                
                 if (check("SPECIAL_CHAR", ")")) {
                     advance(); // consume ')'
                     ASTNode castExpr = parseUnary();
-                    ASTNode castNode = ASTNode.of("CAST", castType.toString());
+                    
+                    // FIX: Pass startToken coordinates to the CAST node
+                    ASTNode castNode = ASTNode.of("CAST", castType.toString(), 
+                        startToken.getLine(), startToken.getColumn());
+                    
                     castNode.addChild(castExpr);
                     return castNode;
                 }
@@ -718,7 +735,7 @@ public class Parser {
             pos = savedPos;
         }
 
-        // 'new' operator: new ClassName(...) or new type[size]
+        // 2. 'new' operator: new ClassName(...) or new type[size]
         if (check("KEYWORD", "new")) {
             Tokens startToken = current();
             advance(); // consume 'new'
@@ -739,9 +756,14 @@ public class Parser {
             // Standard object construction: new ClassName(args)
             ASTNode newNode = ASTNode.of("NEW", typeName,
                 startToken.getLine(), startToken.getColumn());
+                
             if (check("SPECIAL_CHAR", "(")) {
+                Tokens parenToken = current(); // Capture '(' for ARGS coordinates
                 advance(); // consume '('
-                ASTNode args = ASTNode.of("ARGS");
+                
+                // FIX: Provide coordinates for the ARGS node wrapper
+                ASTNode args = ASTNode.of("ARGS", parenToken.getLine(), parenToken.getColumn());
+                
                 while (!isAtEnd() && !check("SPECIAL_CHAR", ")")) {
                     args.addChild(parseExpression());
                     if (check("PUNCTUATION", ",")) advance();
@@ -752,13 +774,18 @@ public class Parser {
             return newNode;
         }
 
-        // Prefix unary operators: !, -, ++, --, ~
+        // 3. Prefix unary operators: !, -, ++, --, ~
         if (currentType() != null && currentType().equals("OPERATOR")
             && (currentLexeme().equals("!") || currentLexeme().equals("-")
                 || currentLexeme().equals("++") || currentLexeme().equals("--")
                 || currentLexeme().equals("~"))) {
+            
+            Tokens opToken = current(); // Capture operator coordinates
             String op = currentLexeme(); advance();
-            ASTNode node = ASTNode.of("UNARY_OP", op);
+            
+            // FIX: Pass opToken coordinates to the UNARY_OP node[cite: 1]
+            ASTNode node = ASTNode.of("UNARY_OP", op, opToken.getLine(), opToken.getColumn());
+            
             node.addChild(parseUnary());
             return node;
         }
@@ -1155,5 +1182,7 @@ public class Parser {
         if (currentType() != null && currentType().equals("IDENTIFIER")) {
             advance(); // skip variable name
         }
+
+        recover();
     }
 }

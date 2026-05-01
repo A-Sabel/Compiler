@@ -233,6 +233,9 @@ public class MainGUI extends JFrame {
             String code = CodeInputArea.getText();
             if (code.trim().isEmpty()) return;
 
+            ErrorHandler.clear(); 
+            errorDetailArea.setText("");
+
             // Run in background to keep GUI responsive
             new Thread(() -> {
                 long startTime = System.nanoTime();

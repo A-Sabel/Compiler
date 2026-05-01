@@ -35,7 +35,7 @@ public class SemanticAnalyzer {
 
             case "METHOD_DECL":
                 validateMethodDeclaration(node);
-                break;
+                return;
 
             case "BLOCK":
                 analyzeBlock(node);
@@ -333,8 +333,6 @@ public class SemanticAnalyzer {
         symbolTable.exitScope();
         currentMethodReturnType = null;
 
-        analyze(bodyNode); // existing walk
-
         // Rule 10: Missing return statement check
         if (!returnType.equals("void") && !allPathsReturn(bodyNode)) {
             ErrorHandler.report("Semantic Error: Missing return statement in method '" + methodName + "'.", 
@@ -444,17 +442,6 @@ public class SemanticAnalyzer {
             case "NUMBER":
                 // Rule 12: Integer Overflow Prevention
                 if (!value.contains(".") && !value.contains("e") && !value.contains("E")) {
-                    try {
-                        long val = Long.parseLong(value);
-                        if (val > Integer.MAX_VALUE || val < Integer.MIN_VALUE) {
-                            ErrorHandler.report("Semantic Error: Integer number too large: " + value, 
-                                                expr.getLine(), expr.getColumn());
-                        }
-                    } catch (NumberFormatException e) {
-                        // This handles values even larger than a Long can hold
-                        ErrorHandler.report("Semantic Error: Integer number too large: " + value, 
-                                            expr.getLine(), expr.getColumn());
-                    }
                     return "int";
                 }
                 return "double";
