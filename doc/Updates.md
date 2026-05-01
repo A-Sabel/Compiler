@@ -139,74 +139,83 @@
 
 ### 3. Code Generation (codegen/ folder)
 
-- ✅ **Bytecode Generation (Core Implementation Completed):**
-  - Implemented full AST → bytecode translation using BytecodeGenerator
+- ✅ **TAC-Based Code Generation (Core Implementation Completed):**
+  - Implemented full AST → Three-Address Code (TAC) translation using `BytecodeGenerator`
   - Supports recursive depth-first traversal of AST nodes
-  - Generates stack-based instructions using Instruction.Opcode
+  - `visit()` returns a TAC address (temp variable, named variable, or literal) for every expression node
+  - Complex expressions are automatically broken into single-operator steps using fresh temporaries (t0, t1, t2, …)
+  - Instructions are represented using `Instruction` with up to four fields: `result`, `arg1`, `op`, `arg2`
 - ✅ **Expression Code Generation:**
-  - Arithmetic operations (+, -, *, /, %) correctly mapped to stack operations (ADD, SUB, MUL, DIV, MOD)
-  - Unary operations (-, !, ~, ++, --) fully supported
-  - Binary comparisons (==, !=, <, >, <=, >=) mapped to comparison opcodes
-  - Logical operators (&&, ||) implemented using short-circuit jump logic
+  - Arithmetic operations (+, -, *, /, %) each produce one TAC instruction: `t1 = left op right`
+  - Unary operations (-, !, ~, ++, --) fully supported with explicit temp results
+  - Binary comparisons (==, !=, <, >, <=, >=) produce boolean temp results
+  - Logical operators (&&, ||) implemented using short-circuit jump logic with temp result variables
+  - Postfix operators (x++, x--) correctly save the original value into a temp before updating
 - ✅ **Variable Handling:**
-  - Variable declaration handled using PUSH / PUSH_CONST + STORE
-  - Variable access uses LOAD
-  - Compound assignments (+=, -=, *=, /=, %=) supported via load-modify-store pattern
+  - Variable declaration with initializer emits: `varName = <expr result>` (COPY instruction)
+  - Variable declaration without initializer emits: `varName = null` (LOAD_CONST)
+  - Variable reads return the variable name directly as a TAC address — no extra instruction emitted
+  - Compound assignments (+=, -=, *=, /=, %=) generate: `t = var op expr`, then `var = t`
 - ✅ **Control Flow Generation:**
-  - if-else statements implemented using JUMP_IF_FALSE and labeled blocks
-  - while loops implemented using start/end labels with conditional jumps
+  - if-else statements use `ifFalse <cond> goto ELSE_n` and labeled blocks
+  - while loops use start/end labels with conditional jump
   - do-while loops execute body before condition check
   - for loops decomposed into:
     - initialization
-    - condition check
-    - update section
+    - condition check with `ifFalse` jump
     - body execution
-    - continue label handling
-    - break and continue implemented using tracked loop labels (currentBreakLabel, currentContinueLabel)
-    - ⚠️ switch statements — generator logic implemented, pending parser fix for CASE node values
+    - FOR_CONTINUE label for update section
+    - FOR_END label for exit
+  - break and continue implemented using tracked loop labels (`currentBreakLabel`, `currentContinueLabel`) with context saved and restored on nesting
+  - ⚠️ switch statements — generator logic implemented (uses temp comparison: `t = switchVal == caseVal; ifTrue t goto CASE_n`), pending parser fix for CASE node values
 - ✅ **Function / Method Support:**
-  - Method declarations supported using METHOD_START and METHOD_END
-  - Parameters stored using STORE_PARAM
+  - Method declarations use `begin_method name:returnType` and `end_method name`
+  - Parameters declared using `param <name>`
+  - Arguments to call sites emitted as individual `arg <value>` instructions before the call
   - Method calls support both:
-  - INVOKE_STATIC
-  - INVOKE_VIRTUAL
-  - Argument count tracking implemented during call generation
-  - Return values handled using RETURN and RETURN_VALUE
+    - `call <name> <argCount>` (static)
+    - `callvirtual <obj> <name> <argCount>` (instance)
+  - Return values handled using `return` (void) and `return <value>`
 - ✅ **Object & Memory Operations:**
-  - Object creation supported using NEW
-  - Field access implemented using FIELD_LOAD and FIELD_STORE
-  - Array operations supported using ARRAY_LOAD and ARRAY_STORE
+  - Object creation: arguments emitted as `arg` instructions, then `result = new <type>(<n> args)`
+  - Field read: `result = object.field` (FIELD_LOAD)
+  - Field write: `object.field = src` (FIELD_STORE)
+  - Array read: `result = base[index]` (ARRAY_LOAD)
+  - Array write: `base[index] = src` (ARRAY_STORE)
 - ✅ **Utility Features:**
-  - Automatic label generation for all control flow structures
-  - Centralized emit() system for instruction creation
-  - Stack cleanup using POP where necessary (expression statements, control flow balancing)
+  - Automatic temp variable generation (`newTemp()`) for all intermediate values
+  - Automatic label generation (`newLabel()`) for all control flow structures
+  - Centralized `emit()` system for instruction creation
+  - Ternary expressions (`? :`) supported with temp result and label-based branching
 
 ### 4. Virtual Machine (vm/ folder)
 
   - ❌ Not yet implemented
-  - Bytecode is currently generated but not executed
+  - TAC is currently generated but not executed
 
 ### 🎯 Recent Improvements (Code Generation Layer)
 
-- **BytecodeGenerator Implementation**
-  - Implemented full instruction mapping from AST nodes to bytecode
-  - Added structured handler methods for:
-    - handleIf, handleWhile, handleFor, handleSwitch
-    - handleBinaryOp, handleUnaryOp, handleAssign
-    - handleMethodCall, handleFieldAccess, handleArrayAccess
-  - Introduced label-based control flow system for loops and conditionals
-  - Added loop context tracking for break and continue support
+- **Switched from Stack-Based to Three-Address Code (TAC)**
+  - Replaced stack opcodes (PUSH, POP, DUP, ADD, etc.) with explicit TAC instructions
+  - `Instruction` class redesigned with `result`, `arg1`, `op`, `arg2` fields and factory methods (e.g. `Instruction.binary(...)`, `Instruction.copy(...)`, `Instruction.loadConst(...)`)
+  - `toString()` on instructions now prints proper TAC notation (e.g. `t1 = 3 * 2`)
+  - `visit()` in `BytecodeGenerator` now returns a String TAC address instead of relying on an implicit stack
+- **BytecodeGenerator Refactor**
+  - All handler methods updated to receive and return TAC addresses
+  - Added `addressOf()` helper to read an lvalue node as a TAC address without emitting extra instructions
+  - Added `storeInto()` helper to emit the correct store instruction for any lvalue (identifier, array slot, or field)
+  - Added `binaryOpcode()` and `compoundOpcode()` lookup helpers for clean operator mapping
 - **Control Flow Enhancements**
   - Improved for-loop translation with explicit FOR_START, FOR_CONTINUE, and FOR_END labels
   - Fixed structured jump handling for nested loops
-  - Ensured correct restoration of previous loop contexts after exiting loops
+  - Ensured correct save/restore of previous loop context (`currentBreakLabel`, `currentContinueLabel`) on every loop entry/exit
 - **Expression Evaluation Improvements**
-  - Enforced strict stack-based evaluation order
-  - Implemented short-circuit evaluation for logical operators (&&, ||)
-  - Ensured correct operand ordering for non-commutative operations
+  - Each sub-expression result stored in a fresh temp, enforcing single-operator TAC form
+  - Short-circuit evaluation for `&&` and `||` uses temp result variable written in both branches
+  - Postfix increment/decrement correctly separates the "before" value (returned) from the updated value (stored back)
 
 ---
 
 ## Last Updated
 
-May 1, 2026
+May 2, 2026
