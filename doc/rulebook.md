@@ -113,3 +113,117 @@ Certain mathematical operations are fundamentally illegal and must be caught dur
 * **14.11 Object and Array Access Rules:** Object field access MUST use FIELD_LOAD and FIELD_STORE instructions. Array access MUST use ARRAY_LOAD and ARRAY_STORE, where index and reference MUST be evaluated before execution.
 * **14.12 Literal and Constant Handling:** Numeric literals MUST use PUSH, while string, boolean, and null values MUST use PUSH_CONST. All literals MUST be pushed onto the stack before participation in any operation.
 * **14.13 Execution Integrity Rule:** The Code Generator MUST ensure that every emitted instruction corresponds to a valid execution step. The Code Generator MUST NOT generate unreachable or orphaned instructions outside of explicitly defined control flow constructs.
+
+---
+
+## Part V: Professional-Grade Code Generation Specifications
+
+### 15. Resource & Boundary Analysis
+*   **15.1 Maximum Stack Depth Calculation:** For every method, the Code Generator MUST calculate the peak operand stack height. This is determined by simulating the stack effect of each instruction: $h_{max} = \max(h_{current} + \text{stack\_delta})$.
+*   **15.2 Local Variable Slot Allocation:** Variable names MUST be mapped to integer indices (slots). The generator MUST calculate `MaxLocals`, accounting for the fact that `long` and `double` types occupy two slots, while other types occupy one.
+*   **15.3 Implicit 'this' Reference:** In instance methods, slot 0 MUST be reserved for the `this` reference, shifting all user-defined parameters and local variables to higher indices.
+
+
+### 16. Constant Pool & Memory Optimization
+*   **16.1 Literal Deduplication:** The Code Generator MUST NOT embed large literals (Strings, Classes, long constants) directly in the instruction stream[cite: 1]. These MUST be moved to a central Constant Pool[cite: 1].
+*   **16.2 LDC Instruction Usage:** Access to the Constant Pool MUST use the `LDC` (Load Constant) instruction family, referencing entries by their pool index rather than their raw value[cite: 1].
+*   **16.3 String Interning:** All unique string literals encountered during generation MUST be interned within the Constant Pool to ensure that identical strings share the same memory address[cite: 1].
+
+### 17. Type-Specific Opcode Selection
+*   **17.1 Type-Prefixing Mandatory:** The generic opcodes defined in Phase 4 (ADD, LOAD, STORE) MUST be replaced with type-prefixed versions[cite: 1]. The generator MUST select the prefix based on the type resolved during Semantic Analysis[cite: 1]:
+    *   `i` for `int`, `boolean`, `byte`, `short`, `char`
+    *   `l` for `long`
+    *   `f` for `float`
+    *   `d` for `double`
+    *   `a` for references (Objects, Arrays)
+*   **17.2 Specialized Zero-Operand Instructions:** For common constants (0, 1, 2, null), the generator SHOULD use specialized, operand-less instructions (e.g., `ICONST_0`, `ACONST_NULL`) to reduce the size of the bytecode.
+
+### 18. Verification & Control Flow Metadata
+*   **18.1 Stack Map Frame Generation:** For every jump target (LABEL), the Code Generator MUST emit a Stack Map Frame. This metadata MUST describe the type-state of the local variables and the operand stack at that specific point to allow for linear-time bytecode verification.
+*   **18.2 Exception Table Mapping:** Rather than using jumps for error handling, `try-catch` blocks MUST be recorded in an Exception Table. Each entry MUST define the range $[start\_pc, end\_pc)$, the `handler_pc`, and the `catch_type`.
+*   **18.3 Dead Code Elimination:** The generator SHOULD identify and omit instructions that are logically unreachable (e.g., code following an unconditional `return`), as these will fail verification in a strict JVM environment.
+
+### 19. Advanced Arithmetic & Conversion
+*   **19.1 Explicit Conversion Instructions:** When the Semantic Analyzer identifies an implicit widening (e.g., `int` to `double`), the Code Generator MUST emit an explicit conversion instruction (e.g., `I2D`) to maintain stack type-safety.
+*   **19.2 Precision Management:** Operations involving floating-point numbers MUST follow strict IEEE 754 rules, ensuring that `fadd` and `dadd` are used correctly based on the required precision.
+
+Beyond the resource management and type-safety rules already established, a professional compiler must bridge the gap between "working logic" and "production-ready execution." These additional specifications focus on performance optimization, debugging integration, and the implicit lifecycle of a program.
+
+---
+
+## Part VI: Advanced Optimization & Runtime Integration
+
+### 20. Compile-Time Optimization (The "Smarter" Generator)
+*   **20.1 Constant Folding:** The Code Generator SHOULD identify expressions consisting entirely of literals (e.g., `2 + 3`) and emit the final result (`PUSH 5`) instead of the arithmetic instructions. This reduces runtime CPU cycles.
+*   **20.2 Peephole Optimization:** The generator SHOULD scan the instruction stream for inefficient sequences. For example, a `STORE x` followed immediately by a `LOAD x` can often be optimized into a `DUP` followed by a `STORE x`.
+    
+*   **20.3 Strength Reduction:** Expensive operations SHOULD be replaced with cheaper equivalents. For example, multiplying an integer by 2 SHOULD be translated as a bitwise left shift (`ISHL 1`) rather than a full multiplication (`IMUL`).
+
+### 21. Debugging & Traceability Metadata
+*   **21.1 LineNumberTable Generation:** The generator MUST maintain a mapping between bytecode offsets and source code line numbers. This is critical for generating meaningful stack traces when a program crashes at runtime.
+*   **21.2 LocalVariableTable:** To support debuggers, the generator SHOULD emit a table mapping slot indices back to their original names (e.g., "Slot 1 is 'counter'"). Without this, debuggers can only show raw slot numbers.
+*   **21.3 SourceFile Attribute:** Every compiled class MUST include an attribute identifying the original source file name (e.g., `App.java`), ensuring the JVM can locate the code for debugging.[cite: 1]
+
+### 22. Implicit Lifecycle & Initialization
+*   **22.1 Default Constructor Generation (`<init>`):** If a class definition in the AST does not explicitly define a constructor, the Code Generator MUST synthesize a default, no-argument constructor that invokes the superclass constructor.
+*   **22.2 Static Initializer (`<clinit>`):** Any static variable initializations (e.g., `static int x = 5;`) MUST be moved into a special `<clinit>` method that is executed exactly once when the class is loaded by the JVM.
+*   **22.3 Field Defaulting:** The generator MUST ensure that all fields are initialized to their default values (e.g., `0` for numeric, `null` for references) before any method execution begins.
+
+### 23. Standard Naming & Descriptors
+*   **23.1 Method Descriptor Encoding:** Professional bytecode does not store names like `int`. It uses JVM type descriptors. The generator MUST translate types into the following format:
+    *   `int` → `I`
+    *   `double` → `D`
+    *   `String` → `Ljava/lang/String;`
+    *   `void` → `V`
+*   **23.2 Signature Mangling:** For overloaded methods, the generator MUST generate a unique internal signature (e.g., `foo(I)V` vs `foo(D)V`) so the runtime can differentiate between them during invocation.
+
+---
+
+
+
+
+
+
+
+## Part VII: Bytecode Optimization
+
+Professional compilers rarely emit the first version of the code they generate.[cite: 1] They run an optimization pass to make the execution faster and smaller.[cite: 1]
+
+### 24. Static Optimization Rules
+*   **24.1 Constant Folding:** If an expression consists entirely of constants (e.g., `5 + 10 * 2`), the compiler MUST evaluate it during the compilation phase and emit a single `PUSH 25` instruction instead of multiple arithmetic operations.[cite: 1]
+*   **24.2 Constant Propagation:** If a variable is assigned a constant value and never modified before its next use, the compiler SHOULD replace the `LOAD <name>` instruction with a direct `PUSH` of that constant.[cite: 1]
+*   **24.3 Dead Code Elimination:** The compiler MUST identify and remove code that cannot be reached (e.g., code after a `return` or inside an `if(false)` block) to reduce the final binary size.[cite: 1]
+
+### 25. Peephole Optimization
+*   **25.1 Redundant Instruction Removal:** The optimizer MUST look for and remove "neutral" instruction sequences, such as:[cite: 1]
+    *   `STORE x` immediately followed by `LOAD x` (replace with `DUP, STORE x`).[cite: 1]
+    *   `ADD` where one operand is `0`.[cite: 1]
+    *   `MUL` where one operand is `1`.[cite: 1]
+*   **25.2 Jump-to-Jump Optimization:** If a `JUMP` instruction targets a label that contains only another `JUMP`, the first instruction SHOULD be updated to target the final destination directly.[cite: 1]
+
+---
+
+## Part VII: Runtime & Virtual Machine (VM) Specifications
+
+Your instructions need an engine to breathe life into them.[cite: 1] You need a specification for the "Virtual Machine" that will execute the `Instruction` list.[cite: 1]
+
+### 26. The Execution Engine
+*   **26.1 Operand Stack Integrity:** The VM MUST throw a `StackOverflowError` if the stack exceeds the `MaxStack` calculated in Phase 4, and a `StackUnderflowError` if an instruction attempts to pop from an empty stack.[cite: 1]
+*   **26.2 Local Variable Array:** The VM MUST maintain a fixed-size array for each method frame to store local variables, indexed by the "slots" assigned during Code Generation.[cite: 1]
+*   **26.3 Program Counter (PC):** The VM MUST maintain a `PC` that points to the current instruction.[cite: 1] Jumps MUST be implemented by updating the `PC` to the index of the target `LABEL`.[cite: 1]
+
+### 27. Standard Library (Built-in Functions)
+*   **27.1 System Interop:** The compiler MUST provide a set of pre-defined method signatures for basic I/O (e.g., `print`, `println`, `readInt`).[cite: 1]
+*   **27.2 Native Method Mapping:** Instructions like `PRINT` MUST map directly to the host language's standard output (e.g., `System.out.println` in Java).[cite: 1]
+
+---
+
+## Part VIII: Debugging & Metadata
+
+### 28. Line Number Mapping
+*   **28.1 Source Mapping:** The compiler SHOULD generate a `LineNumberTable` that maps bytecode offsets to original source code line numbers.[cite: 1]
+*   **28.2 Error Reporting (Runtime):** If a runtime error occurs (like division by zero), the VM MUST use the `LineNumberTable` to report the error's location in the user's original `.java` or `.txt` file rather than just the bytecode index.[cite: 1]
+
+### 29. Symbol Export
+*   **29.1 AST Visualization:** For grading and debugging, the compiler MUST support exporting the AST into a structured format (like JSON or a `.dot` file for Graphviz).[cite: 1]
+*   **29.2 Bytecode Disassembler:** The compiler SHOULD include a utility to print the generated `List<Instruction>` in a human-readable "assembly" format, similar to the `javap` tool.[cite: 1]

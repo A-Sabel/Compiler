@@ -103,14 +103,6 @@
   - Lambda expressions
   - Exception type checking
 
-### 2. Code Generation (`codegen/` folder)
-
-- Not yet implemented
-
-### 3. Virtual Machine (`vm/` folder)
-
-- Not yet implemented
-
 ---
 
 ## 🎯 Recent Improvements (April 30, 2026)
@@ -135,7 +127,7 @@
 - Full variable scope tracking with symbol table integration
 - Comprehensive loop control validation (`break`/`continue`)
 
-### Compiler UX ("Strategic Mentor" Polish)
+### Compiler UX
 
 - ✨ **Smart:** Detects and suggests type name typos
 - ✨ **Clean:** Eliminates redundant error reporting
