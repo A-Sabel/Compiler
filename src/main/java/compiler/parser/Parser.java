@@ -1083,6 +1083,7 @@ public class Parser {
 
         // Uppercase-initial IDENTIFIER treated as a reference type (e.g. MyClass, String[])
         if ("IDENTIFIER".equals(type) && !lex.isEmpty() && Character.isUpperCase(lex.charAt(0))) {
+            if (lex.equals("System")) return false;
             return true;
         }
 
