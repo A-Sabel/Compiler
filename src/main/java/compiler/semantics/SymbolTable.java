@@ -55,8 +55,9 @@ public final class SymbolTable {
         return null; // Variable not found
     }
 
-    public boolean isDefinedInCurrentScope(String name) {
-        return scopes.peek().containsKey(name);
+    public boolean isDeclaredInCurrentScope(String name) {
+        if (scopes.isEmpty()) return false;
+        return scopes.peek().containsKey(name); // Checks ONLY the current block
     }
 
     // --- Method Management (OVERLOADING SUPPORT) ---

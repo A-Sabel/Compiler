@@ -238,10 +238,9 @@ public class SemanticAnalyzer {
         String name = nameNode.getValue();
 
         // Duplicate definition check
-        if (symbolTable.lookupVariableType(name) != null) {
-            ErrorHandler.report(
-                "Semantic Error: Variable '" + name + "' is already defined in this scope.",
-                nameNode.getLine(), nameNode.getColumn());
+        if (symbolTable.isDeclaredInCurrentScope(name)) {
+            ErrorHandler.report("Semantic Error: Variable '" + name + "' is already defined in this scope.", 
+                                nameNode.getLine(), nameNode.getColumn());
             return;
         }
 
@@ -333,6 +332,14 @@ public class SemanticAnalyzer {
 
         symbolTable.exitScope();
         currentMethodReturnType = null;
+
+        analyze(bodyNode); // existing walk
+
+        // Rule 10: Missing return statement check
+        if (!returnType.equals("void") && !allPathsReturn(bodyNode)) {
+            ErrorHandler.report("Semantic Error: Missing return statement in method '" + methodName + "'.", 
+                                node.getLine(), node.getColumn());
+        }
     }
 
     // ── Return Statement ───────────────────────────────────────────────────────
@@ -376,30 +383,48 @@ public class SemanticAnalyzer {
         ASTNode lhs = children.get(0);
         ASTNode rhs = children.get(1);
 
-        String lhsNodeType = lhs.getType();
-        if (!lhsNodeType.equals("IDENTIFIER") && !lhsNodeType.equals("FIELD_ACCESS")
-                && !lhsNodeType.equals("ARRAY_ACCESS")) {
-            ErrorHandler.report("Semantic Error: Invalid assignment target.",
-                node.getLine(), node.getColumn());
+        // 1. Resolve the base variable name and validate the target type
+        String varName;
+        String lhsType = lhs.getType();
+
+        if (lhsType.equals("ARRAY_ACCESS")) {
+            // For array access, the name is in the first child (the identifier)
+            varName = lhs.getChildren().get(0).getValue(); 
+        } else if (lhsType.equals("IDENTIFIER") || lhsType.equals("FIELD_ACCESS")) {
+            varName = lhs.getValue();
+        } else {
+            ErrorHandler.report("Semantic Error: Invalid assignment target.", node.getLine(), node.getColumn());
             return;
         }
 
-        String varName = lhs.getValue();
-        String varType = symbolTable.lookupVariableType(varName);
-
-        if (varType == null) {
-            ErrorHandler.report(
-                "Semantic Error: Variable '" + varName + "' used in assignment before declaration.",
-                node.getLine(), node.getColumn());
+        // 2. Look up the variable in the Symbol Table
+        String baseVarType = symbolTable.lookupVariableType(varName);
+        if (baseVarType == null) {
+            ErrorHandler.report("Semantic Error: Variable '" + varName + "' used in assignment before declaration.", 
+                                node.getLine(), node.getColumn());
             return;
         }
 
+        // 3. Determine the exact expected type on the Left-Hand Side
+        String expectedType = baseVarType;
+        
+        if (lhsType.equals("ARRAY_ACCESS")) {
+            // If assigning to cars[1], we expect String, not String[]
+            if (baseVarType.endsWith("[]")) {
+                expectedType = baseVarType.substring(0, baseVarType.length() - 2);
+            }
+        } else if (lhsType.equals("FIELD_ACCESS") && lhs.getValue().equals("length")) {
+            // Prevent assigning to read-only .length property
+            ErrorHandler.report("Semantic Error: Cannot assign value to read-only property 'length'.", 
+                                lhs.getLine(), lhs.getColumn());
+            return;
+        }
+
+        // 4. Validate RHS compatibility
         String rhsType = inferExpressionType(rhs);
-        if (rhsType != null && !rhsType.equals("type_error")
-                && !isTypeCompatible(varType, rhsType)) {
-            ErrorHandler.report(
-                "Semantic Error: Cannot assign " + rhsType + " to " + varType + ".",
-                node.getLine(), node.getColumn());
+        if (rhsType != null && !rhsType.equals("type_error") && !isTypeCompatible(expectedType, rhsType)) {
+            ErrorHandler.report("Semantic Error: Cannot assign " + rhsType + " to " + expectedType + ".",
+                                node.getLine(), node.getColumn());
         }
     }
 
@@ -417,11 +442,22 @@ public class SemanticAnalyzer {
 
         switch (type) {
             case "NUMBER":
-                // Long literal (ends with L/l), float (F/f), double (decimal/exponent)
-                if (value.endsWith("L") || value.endsWith("l")) return "long";
-                if (value.endsWith("F") || value.endsWith("f")) return "float";
-                if (value.contains(".") || value.contains("e") || value.contains("E")) return "double";
-                return "int";
+                // Rule 12: Integer Overflow Prevention
+                if (!value.contains(".") && !value.contains("e") && !value.contains("E")) {
+                    try {
+                        long val = Long.parseLong(value);
+                        if (val > Integer.MAX_VALUE || val < Integer.MIN_VALUE) {
+                            ErrorHandler.report("Semantic Error: Integer number too large: " + value, 
+                                                expr.getLine(), expr.getColumn());
+                        }
+                    } catch (NumberFormatException e) {
+                        // This handles values even larger than a Long can hold
+                        ErrorHandler.report("Semantic Error: Integer number too large: " + value, 
+                                            expr.getLine(), expr.getColumn());
+                    }
+                    return "int";
+                }
+                return "double";
 
             case "LITERAL":
                 if (value.startsWith("\""))                      return "String";
@@ -605,7 +641,21 @@ public class SemanticAnalyzer {
             }
 
             case "CAST":
-                return value; // cast target type
+                String targetType = value;
+                ASTNode castExpr = expr.getChildren().get(0);
+                String actualType = inferExpressionType(castExpr);
+
+                // Rule 9: Narrowing/Explicit Cast Requirement
+                boolean numericToNumeric = isNumericType(targetType) && isNumericType(actualType);
+                boolean compatible = isTypeCompatible(targetType, actualType) || isTypeCompatible(actualType, targetType);
+
+                if (!numericToNumeric && !compatible) {
+                    ErrorHandler.report("Semantic Error: Inconvertible types; cannot cast '" + 
+                                        actualType + "' to '" + targetType + "'.", 
+                                        expr.getLine(), expr.getColumn());
+                    return "type_error";
+                }
+                return targetType;
 
             case "NEW":
                 return value; // class name
@@ -871,4 +921,28 @@ public class SemanticAnalyzer {
             }
         }
     }
+
+    private boolean allPathsReturn(ASTNode node) {
+    if (node == null) return false;
+    String type = node.getType();
+
+    switch (type) {
+        case "RETURN": return true;
+        case "BLOCK":
+        case "BODY":
+            for (ASTNode child : node.getChildren()) {
+                if (allPathsReturn(child)) return true;
+            }
+            return false;
+        case "IF_STMT":
+            // Both branches must return for the IF to guarantee a return
+            ASTNode thenBranch = null, elseBranch = null;
+            for (ASTNode child : node.getChildren()) {
+                if (child.getType().equals("THEN")) thenBranch = child;
+                if (child.getType().equals("ELSE")) elseBranch = child;
+            }
+            return allPathsReturn(thenBranch) && allPathsReturn(elseBranch);
+        default: return false;
+    }
+}
 }
