@@ -48,6 +48,9 @@ public final class Instruction {
         ARG,            // arg <value>                  push one call argument
         CALL,           // result = call <name> <argCount>   (static)
         CALL_VIRTUAL,   // result = callvirtual <obj> <name> <argCount>
+        // §23.2: descriptor-carrying variants — preferred at all new call sites
+        CALL_DESC,          // result = call <name> <descriptor> <argCount>
+        CALL_VIRTUAL_DESC,  // result = callvirtual <obj> <name> <descriptor> <argCount>
         RETURN,         // return
         RETURN_VALUE,   // return <value>
 
@@ -92,130 +95,127 @@ public final class Instruction {
     }
 
     private final Opcode opcode;
-    private final String result;   // destination variable / temp (may be null)
-    private final String arg1;     // first source / operand      (may be null)
-    private final String op;       // operator string             (may be null)
-    private final String arg2;     // second source / operand     (may be null)
+    private final String result;
+    private final String arg1;  
+    private final String op;    
+    private final String arg2;  
+    private final String descriptor;
 
     private Instruction(Opcode opcode, String result, String arg1, String op, String arg2) {
-        this.opcode = opcode;
-        this.result = result;
-        this.arg1   = arg1;
-        this.op     = op;
-        this.arg2   = arg2;
+        this(opcode, result, arg1, op, arg2, null);
     }
 
-    /** result = literal  (e.g. t0 = 42) */
+    private Instruction(Opcode opcode, String result, String arg1, String op, String arg2,
+                        String descriptor) {
+        this.opcode     = opcode;
+        this.result     = result;
+        this.arg1       = arg1;
+        this.op         = op;
+        this.arg2       = arg2;
+        this.descriptor = descriptor;
+    }
+
     public static Instruction loadConst(String result, String literal) {
         return new Instruction(Opcode.LOAD_CONST, result, literal, null, null);
     }
 
-    /** result = src  (simple copy / assignment) */
     public static Instruction copy(String result, String src) {
         return new Instruction(Opcode.COPY, result, src, null, null);
     }
 
-    /** result = left op right  (binary arithmetic / comparison) */
     public static Instruction binary(Opcode opcode, String result, String left, String op, String right) {
         return new Instruction(opcode, result, left, op, right);
     }
 
-    /** result = op operand  (unary) */
     public static Instruction unary(Opcode opcode, String result, String operand) {
         return new Instruction(opcode, result, operand, null, null);
     }
 
-    /** result = (type) operand */
     public static Instruction cast(String result, String type, String operand) {
         return new Instruction(Opcode.CAST, result, operand, type, null);
     }
 
-    /** result = base[index] */
     public static Instruction arrayLoad(String result, String base, String index) {
         return new Instruction(Opcode.ARRAY_LOAD, result, base, null, index);
     }
 
-    /** base[index] = src */
     public static Instruction arrayStore(String base, String index, String src) {
         return new Instruction(Opcode.ARRAY_STORE, null, base, index, src);
     }
 
-    /** result = object.field */
     public static Instruction fieldLoad(String result, String object, String field) {
         return new Instruction(Opcode.FIELD_LOAD, result, object, field, null);
     }
 
-    /** object.field = src */
     public static Instruction fieldStore(String object, String field, String src) {
         return new Instruction(Opcode.FIELD_STORE, null, object, field, src);
     }
 
-    /** LABEL <name> */
     public static Instruction label(String name) {
         return new Instruction(Opcode.LABEL, name, null, null, null);
     }
 
-    /** goto <label> */
     public static Instruction jump(String label) {
         return new Instruction(Opcode.JUMP, null, label, null, null);
     }
 
-    /** ifTrue <cond> goto <label> */
     public static Instruction jumpIfTrue(String cond, String label) {
         return new Instruction(Opcode.JUMP_IF_TRUE, null, cond, label, null);
     }
 
-    /** ifFalse <cond> goto <label> */
     public static Instruction jumpIfFalse(String cond, String label) {
         return new Instruction(Opcode.JUMP_IF_FALSE, null, cond, label, null);
     }
 
-    /** METHOD_START name:returnType */
     public static Instruction methodStart(String name, String returnType) {
         return new Instruction(Opcode.METHOD_START, null, name, returnType, null);
     }
 
-    /** METHOD_END name */
     public static Instruction methodEnd(String name) {
         return new Instruction(Opcode.METHOD_END, null, name, null, null);
     }
 
-    /** param <name> */
     public static Instruction param(String name) {
         return new Instruction(Opcode.PARAM, null, name, null, null);
     }
 
-    /** arg <value>  — one argument before a call */
     public static Instruction arg(String value) {
         return new Instruction(Opcode.ARG, null, value, null, null);
     }
 
-    /** result = call <name> <argCount> */
     public static Instruction call(String result, String name, int argCount) {
         return new Instruction(Opcode.CALL, result, name, String.valueOf(argCount), null);
     }
 
-    /** result = callvirtual <obj> <name> <argCount> */
     public static Instruction callVirtual(String result, String obj, String name, int argCount) {
         return new Instruction(Opcode.CALL_VIRTUAL, result, obj, name, String.valueOf(argCount));
     }
 
-    /** return */
+    public static Instruction callWithDescriptor(String result, String name,
+                                                String descriptor, int argCount) {
+        return new Instruction(Opcode.CALL_DESC, result, name,
+                String.valueOf(argCount), null, descriptor);
+    }
+
+    public static Instruction callVirtualWithDescriptor(String result, String obj,
+                                                        String name, String descriptor,
+                                                        int argCount) {
+        return new Instruction(Opcode.CALL_VIRTUAL_DESC, result, obj,
+                name, String.valueOf(argCount), descriptor);
+    }
+
     public static Instruction ret() {
         return new Instruction(Opcode.RETURN, null, null, null, null);
     }
 
-    /** return <value> */
     public static Instruction retValue(String value) {
         return new Instruction(Opcode.RETURN_VALUE, null, value, null, null);
     }
 
-    /** result = new <type>  (args already emitted as ARG instructions) */
     public static Instruction newObj(String result, String type, int argCount) {
         return new Instruction(Opcode.NEW, result, type, String.valueOf(argCount), null);
     }
 
-    /** print <argCount>  (args already emitted as ARG instructions) */
     public static Instruction print(int argCount) {
         return new Instruction(Opcode.PRINT, null, String.valueOf(argCount), null, null);
     }
@@ -260,7 +260,8 @@ public final class Instruction {
         return new Instruction(Opcode.STACK_MAP_FRAME, null, labelName, frameDescriptor, null);
     }
 
-    public static Instruction exceptionTableEntry(String startLabel, String endLabel, String handlerLabel, String catchType) {
+    public static Instruction exceptionTableEntry(String startLabel, String endLabel,
+                                                String handlerLabel, String catchType) {
         return new Instruction(Opcode.EXCEPTION_TABLE_ENTRY,
                 null, startLabel, endLabel, handlerLabel + ":" + catchType);
     }
@@ -315,11 +316,12 @@ public final class Instruction {
         return new Instruction(Opcode.METHOD_DESCRIPTOR, null, methodName, descriptor, null);
     }
 
-    public Opcode getOpcode() { return opcode; }
-    public String getResult() { return result; }
-    public String getArg1()   { return arg1;   }
-    public String getOp()     { return op;      }
-    public String getArg2()   { return arg2;    }
+    public Opcode getOpcode()     { return opcode;     }
+    public String getResult()     { return result;     }
+    public String getArg1()       { return arg1;       }
+    public String getOp()         { return op;         }
+    public String getArg2()       { return arg2;       }
+    public String getDescriptor() { return descriptor; }
 
     @Override
     public String toString() {
@@ -354,8 +356,18 @@ public final class Instruction {
             case PARAM:         return "param " + arg1;
             case ARG:           return "arg " + arg1;
 
-            case CALL:          return (result != null ? result + " = " : "") + "call " + arg1 + " " + op;
-            case CALL_VIRTUAL:  return (result != null ? result + " = " : "") + "callvirtual " + arg1 + " " + op + " " + arg2;
+            case CALL:
+                return (result != null ? result + " = " : "") + "call " + arg1 + " " + op;
+            case CALL_VIRTUAL:
+                return (result != null ? result + " = " : "")
+                        + "callvirtual " + arg1 + " " + op + " " + arg2;
+
+            case CALL_DESC:
+                return (result != null ? result + " = " : "")
+                        + "call " + arg1 + " " + descriptor + " (" + op + " args)";
+            case CALL_VIRTUAL_DESC:
+                return (result != null ? result + " = " : "")
+                        + "callvirtual " + arg1 + " " + op + " " + descriptor + " (" + arg2 + " args)";
 
             case RETURN:        return "return";
             case RETURN_VALUE:  return "return " + arg1;
