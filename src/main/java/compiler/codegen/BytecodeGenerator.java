@@ -47,7 +47,7 @@ public class BytecodeGenerator {
 
         public void pop(int n) {
             current -= n;
-            if (current < 0) current = 0; // guard against tracking imprecision
+            if (current < 0) current = 0;
         }
 
         public int maxDepth()   { return maxDepth; }
@@ -57,23 +57,31 @@ public class BytecodeGenerator {
 
     private static class SlotAllocator {
 
-        private final Map<String, Integer> slots  = new LinkedHashMap<>();
+        private final Map<String, Integer> slots    = new LinkedHashMap<>();
+        private final Map<String, String>  jvmDescs = new LinkedHashMap<>();
         private int nextSlot = 0;
 
         public void reserveThis() {
-            slots.put("this", nextSlot++);
+            slots.put("this", nextSlot);
+            jvmDescs.put("this", "Ljava/lang/Object;");
+            nextSlot++;
         }
 
         public int allocate(String name, String jvmType) {
             if (slots.containsKey(name)) return slots.get(name);
             int slot = nextSlot;
             slots.put(name, slot);
+            jvmDescs.put(name, jvmType);
             nextSlot += (jvmType.equals("J") || jvmType.equals("D")) ? 2 : 1;
             return slot;
         }
 
         public int slotOf(String name) {
             return slots.getOrDefault(name, -1);
+        }
+
+        public String jvmTypeOf(String name) {
+            return jvmDescs.getOrDefault(name, "I");
         }
 
         public int maxLocals() {
@@ -86,10 +94,15 @@ public class BytecodeGenerator {
 
         public void reset(boolean isInstanceMethod) {
             slots.clear();
+            jvmDescs.clear();
             nextSlot = 0;
             if (isInstanceMethod) reserveThis();
         }
     }
+
+    private final Map<String, String> methodDescriptors = new HashMap<>();
+
+    private final java.util.Set<String> staticMethods = new java.util.HashSet<>();
 
     private final List<Instruction> instructions = new ArrayList<>();
     private int tempCount  = 0;
@@ -119,6 +132,8 @@ public class BytecodeGenerator {
         currentBreakLabel    = null;
         currentContinueLabel = null;
         unreachable = false;
+        methodDescriptors.clear();
+        staticMethods.clear();
         visit(root);
 
         applyPeepholeOptimizations();
@@ -160,7 +175,7 @@ public class BytecodeGenerator {
         if (sourceType == null) return "V";
         switch (sourceType.trim()) {
             case "int":     case "boolean":
-            case "byte":    case "short":    case "char":   return "I";
+            case "byte":    case "short":    case "char":    return "I";
             case "long":                                     return "J";
             case "float":                                    return "F";
             case "double":                                   return "D";
@@ -292,7 +307,7 @@ public class BytecodeGenerator {
                     int idx = constantPool.addConstant("LONG:" + literal);
                     emit(Instruction.ldc(result, idx));
                 }
-                stackTracker.push(2); // long occupies 2 stack slots
+                stackTracker.push(2);
                 return;
             }
             if (jvmType.equals("F")) {
@@ -315,10 +330,9 @@ public class BytecodeGenerator {
                     int idx = constantPool.addConstant("DOUBLE:" + literal);
                     emit(Instruction.ldc(result, idx));
                 }
-                stackTracker.push(2); // double occupies 2 stack slots
+                stackTracker.push(2);
                 return;
             }
-            // Integer range
             int iv = Integer.parseInt(literal);
             String mnemonic;
             if      (iv == -1)               mnemonic = "ICONST_M1";
@@ -340,15 +354,15 @@ public class BytecodeGenerator {
     }
 
     public void emitConversion(String result, String src, String fromType, String toType) {
-        String mnemonic = fromType + "2" + toType; // e.g. "I2D", "D2I"
+        String mnemonic = fromType + "2" + toType;
         emit(Instruction.convert(result, src, mnemonic));
         stackTracker.pop(fromType.equals("J") || fromType.equals("D") ? 2 : 1);
         stackTracker.push(toType.equals("J") || toType.equals("D") ? 2 : 1);
     }
 
     public void emitStackMapFrame(String labelName,
-                                  List<String> localTypes,
-                                  List<String> stackTypes) {
+                                List<String> localTypes,
+                                List<String> stackTypes) {
         String descriptor = "locals:<" + String.join(",", localTypes) + ">"
                 + ";stack:<" + String.join(",", stackTypes) + ">";
         emit(Instruction.stackMapFrame(labelName, descriptor));
@@ -401,8 +415,6 @@ public class BytecodeGenerator {
             } else {
                 emit(Instruction.ishr(result, left, String.valueOf(shift)));
             }
-            // FIX: In TAC mode the operands are named variables already computed —
-            // they are not on the operand stack. Only the produced result is pushed.
             stackTracker.push();
             return result;
         } catch (NumberFormatException e) {
@@ -410,17 +422,6 @@ public class BytecodeGenerator {
         }
     }
 
-    /**
-     * FIX: Peephole pass completely rewritten.
-     * The original logic was backwards: it replaced the first instruction with DUP
-     * (a stack op that makes no sense at TAC level) and kept the wrong target in
-     * the second instruction. The correct transformation for a copy-copy chain
-     *   t1 = x
-     *   y  = t1
-     * is simply to collapse it into a single direct copy:
-     *   y  = x
-     * This eliminates the dead intermediate temp without corrupting any operand.
-     */
     private void applyPeepholeOptimizations() {
         for (int i = 0; i < instructions.size() - 1; i++) {
             Instruction curr = instructions.get(i);
@@ -434,16 +435,11 @@ public class BytecodeGenerator {
                     && next.getArg1()   != null
                     && curr.getResult().equals(next.getArg1())) {
 
-                // curr: temp = originalSrc
-                // next: finalDest = temp
-                // Collapse: finalDest = originalSrc  (remove the temp entirely)
-                String finalDest  = next.getResult();
+                String finalDest   = next.getResult();
                 String originalSrc = curr.getArg1();
 
                 instructions.set(i,     Instruction.copy(finalDest, originalSrc));
-                instructions.remove(i + 1); // delete the redundant second copy
-                // do NOT increment i — the newly merged instruction should still
-                // be checked against the instruction that follows it
+                instructions.remove(i + 1);
             }
         }
     }
@@ -471,6 +467,31 @@ public class BytecodeGenerator {
             String desc = varTypes.getOrDefault(name, "I");
             emit(Instruction.localVarTable(slot, name, desc));
         }
+    }
+
+    private String maybeWiden(String src, String fromJvm, String toJvm) {
+        if (fromJvm.equals(toJvm)) return src;
+
+        boolean needsWiden = false;
+        switch (fromJvm) {
+            case "I":
+                needsWiden = toJvm.equals("J") || toJvm.equals("F") || toJvm.equals("D");
+                break;
+            case "J":
+                needsWiden = toJvm.equals("F") || toJvm.equals("D");
+                break;
+            case "F":
+                needsWiden = toJvm.equals("D");
+                break;
+            default:
+                needsWiden = false;
+        }
+
+        if (!needsWiden) return src;
+
+        String conv = newTemp();
+        emitConversion(conv, src, fromJvm, toJvm);
+        return conv;
     }
 
     private String visit(ASTNode node) {
@@ -547,6 +568,8 @@ public class BytecodeGenerator {
 
             case "VAR_DECL": handleVarDecl(node); return null;
 
+            case "TRY_STMT": handleTryCatch(node); return null;
+
             case "PARAMS": case "PARAM": case "MODIFIERS":
             case "RETURN_TYPE": case "TYPE": case "NAME":
                 return null;
@@ -570,8 +593,19 @@ public class BytecodeGenerator {
             case "METHOD_CALL": return handleMethodCall(node);
             case "FIELD_ACCESS":return handleFieldAccess(node);
 
-            case "IDENTIFIER":
-                return node.getValue();
+            case "IDENTIFIER": {
+                String varName = node.getValue();
+                int slot = slotAllocator.slotOf(varName);
+                if (slot >= 0) {
+                    String jvmType = slotAllocator.jvmTypeOf(varName);
+                    String result  = newTemp();
+                    Opcode loadOpc = typedLoadOpcode(jvmType);
+                    emit(Instruction.typedLoad(loadOpc, result, String.valueOf(slot)));
+                    stackTracker.push(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
+                    return result;
+                }
+                return varName;
+            }
 
             case "NUMBER":
             case "LITERAL": {
@@ -601,6 +635,8 @@ public class BytecodeGenerator {
         boolean isInstance = !hasModifier(node, "static");
         currentMethodIsInstance = isInstance;
 
+        if (!isInstance) staticMethods.add(name);
+
         slotAllocator.reset(isInstance);
         stackTracker.reset();
 
@@ -613,6 +649,8 @@ public class BytecodeGenerator {
             }
         }
         String descriptor = buildMethodDescriptor(paramTypes, returnType);
+
+        methodDescriptors.put(name, descriptor);
 
         emit(Instruction.methodStart(name, returnType));
         emit(Instruction.methodDescriptor(name, descriptor));
@@ -628,9 +666,6 @@ public class BytecodeGenerator {
                 emit(Instruction.param(pName));
             }
         }
-
-        // FIX: removed dead local variable "ASTNode classBody = null" that was
-        // declared here but never assigned or read.
 
         unreachable = false;
         visitChildOfType(node, "BODY");
@@ -652,17 +687,78 @@ public class BytecodeGenerator {
         ASTNode initValue = getChildOfType(node, "INIT_VALUE");
         if (initValue != null) {
             String src = visit(initValue);
+
+            String srcJvm = inferExprJvmType(initValue);
+            src = maybeWiden(src, srcJvm, jvmType);
+
             Opcode storeOpc = typedStoreOpcode(jvmType);
             emit(Instruction.typedStore(storeOpc,
                     String.valueOf(slotAllocator.slotOf(varName)), src));
-            // FIX: pop the correct number of slots — wide types (long/double) occupy 2.
-            // Previously this always popped 2 for wide types even when the initializer
-            // only pushed 1 (e.g. an identifier expression), corrupting the tracker.
-            // Now we pop the same width that the JVM type actually occupies.
             stackTracker.pop(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
         } else {
             emitFieldDefault(varName, jvmType);
         }
+    }
+
+    private void handleTryCatch(ASTNode node) {
+        String tryStart   = newLabel("TRY_START");
+        String tryEnd     = newLabel("TRY_END");
+
+        emitStackMapFrame(tryStart, List.of(), List.of());
+        emit(Instruction.label(tryStart));
+        unreachable = false;
+
+        ASTNode tryBody = getChildOfType(node, "BODY");
+        if (tryBody != null) visit(tryBody);
+
+        emit(Instruction.label(tryEnd));
+
+        String afterAll = newLabel("TRY_AFTER");
+        emit(Instruction.jump(afterAll));
+
+        ASTNode finallyNode = null;
+        for (ASTNode child : node.getChildren()) {
+            if ("FINALLY".equals(child.getType())) {
+                finallyNode = child;
+                continue;
+            }
+            if (!"CATCH_CLAUSE".equals(child.getType())) continue;
+
+            String catchType    = getChildValue(child, "TYPE");
+            String catchParam   = getChildValue(child, "NAME");
+            String handlerLabel = newLabel("CATCH_" + (catchType != null ? catchType : "Exception"));
+
+            emitExceptionTableEntry(tryStart, tryEnd, handlerLabel,
+                    catchType != null ? catchType : "java/lang/Exception");
+
+            emitStackMapFrame(handlerLabel, List.of(), List.of("L" + (catchType != null ? catchType : "java/lang/Exception") + ";"));
+            emit(Instruction.label(handlerLabel));
+            unreachable = false;
+
+            if (catchParam != null) {
+                slotAllocator.allocate(catchParam, "Ljava/lang/Throwable;");
+                int slot = slotAllocator.slotOf(catchParam);
+                emit(Instruction.typedStore(Opcode.ASTORE, String.valueOf(slot), "exception"));
+                stackTracker.pop(1);
+            }
+
+            ASTNode handlerBody = getChildOfType(child, "BODY");
+            if (handlerBody != null) visit(handlerBody);
+
+            emit(Instruction.jump(afterAll));
+        }
+
+        if (finallyNode != null) {
+            String finallyLabel = newLabel("FINALLY");
+            emitStackMapFrame(finallyLabel, List.of(), List.of());
+            emit(Instruction.label(finallyLabel));
+            unreachable = false;
+            visit(finallyNode);
+        }
+
+        emitStackMapFrame(afterAll, List.of(), List.of());
+        emit(Instruction.label(afterAll));
+        unreachable = false;
     }
 
     private void handleIf(ASTNode node) {
@@ -845,12 +941,6 @@ public class BytecodeGenerator {
         if (!node.getChildren().isEmpty()) {
             String val = visit(node.getChildren().get(0));
             emit(Instruction.retValue(val));
-            // FIX: pop the correct slot width — long/double occupy 2 slots.
-            // Previously always popped 1, leaving the tracker off-by-one for wide returns.
-            // We don't have the declared return type here, so we check whether the
-            // value name came from a wide literal push via the tracker's current depth.
-            // The safest portable fix is to pop 1 for all TAC-level return values,
-            // since at TAC level each named temp is one logical variable regardless of width.
             stackTracker.pop(1);
         } else {
             emit(Instruction.ret());
@@ -859,11 +949,6 @@ public class BytecodeGenerator {
     }
 
     private void handlePrint(ASTNode node) {
-        // FIX: The parser's parsePrint() attaches the expression directly as a child
-        // of PRINT_STMT — there is no intermediate ARGS wrapper node.
-        // The original code called getChildOfType(node, "ARGS") which always returned
-        // null, so nothing was ever pushed and print 0 was always emitted.
-        // Now we visit each direct child that is not a metadata node.
         int argCount = 0;
         for (ASTNode child : node.getChildren()) {
             String val = visit(child);
@@ -886,13 +971,10 @@ public class BytecodeGenerator {
         if (!op.equals("=")) {
             String lhsVal = addressOf(left);
             String rhsVal = visit(right);
-            String opStr  = op.replace("=", ""); // e.g. "+=" → "+"
+            String opStr  = op.replace("=", "");
 
-            // FIX: Derive the JVM type from the LHS variable's slot type so that
-            // compound ops on double/float/long emit the correct typed opcode
-            // (DADD, FADD, LADD…) instead of always emitting IADD.
             String lhsSourceType = slotAllocator.slotOf(left.getValue()) >= 0
-                    ? resolveSlotJvmType(left.getValue())
+                    ? slotAllocator.jvmTypeOf(left.getValue())   
                     : "I";
 
             rhs = newTemp();
@@ -900,32 +982,20 @@ public class BytecodeGenerator {
             if (reduced == null) {
                 Opcode binOp = resolveTypedBinaryOpcode(opStr, lhsSourceType);
                 emit(Instruction.binary(binOp, rhs, lhsVal, opStr, rhsVal));
-                stackTracker.push(); // result of the binary op
+                stackTracker.push();
             }
         } else {
             rhs = visit(right);
         }
 
+        if (left.getType().equals("IDENTIFIER")) {
+            String lhsJvm = slotAllocator.jvmTypeOf(left.getValue());
+            String rhsJvm = inferExprJvmType(right);
+            rhs = maybeWiden(rhs, rhsJvm, lhsJvm);
+        }
+
         storeInto(left, rhs);
         return rhs;
-    }
-
-    /**
-     * Resolves the JVM type descriptor for a named variable from the slot allocator.
-     * Returns "I" (int) as a safe default when the variable is not found.
-     */
-    private String resolveSlotJvmType(String varName) {
-        // The slot allocator knows the JVM descriptor used at allocation time.
-        // We reconstruct it by checking the slot width: wide slots (2) imply J or D.
-        // Without storing the original descriptor in SlotAllocator we cannot
-        // distinguish J from D, so callers that need precision should pass type info.
-        // For compound-assign purposes I/J/F/D is sufficient — return "I" for non-wide.
-        int slot = slotAllocator.slotOf(varName);
-        if (slot < 0) return "I";
-        // SlotAllocator does not expose the descriptor directly; we return "I" as a
-        // conservative default. A full implementation would store varName→jvmDesc
-        // in handleVarDecl and look it up here.
-        return "I";
     }
 
     private String handleTernary(ASTNode node) {
@@ -1098,28 +1168,16 @@ public class BytecodeGenerator {
         return original;
     }
 
-    /**
-     * FIX 1: Operand is always the single child at index 0, not index 1.
-     *         A CAST node from the parser has exactly one child — the expression
-     *         being cast. The target type lives in node.getValue().
-     * FIX 2: fromDesc was hardcoded to "I" (int). Now we infer the source type
-     *         from the literal/identifier value of the operand so that casts like
-     *         (int) myDouble emit D2I instead of the nonsensical I2I.
-     */
     private String handleCast(ASTNode node) {
-        String targetType = node.getValue(); // e.g. "int", "double"
+        String targetType = node.getValue();
 
-        // FIX 1: child is at index 0, not 1
         ASTNode operandNode = node.getChildren().get(0);
         String  operand     = visit(operandNode);
         String  result      = newTemp();
 
         String toDesc   = toJvmDescriptor(targetType);
-
-        // FIX 2: derive the from-type from the operand node instead of hardcoding "I"
         String fromDesc = inferNodeJvmType(operandNode);
 
-        // Only emit a conversion if there is actually a type change
         if (!fromDesc.equals(toDesc)) {
             emitConversion(result, operand, fromDesc, toDesc);
         } else {
@@ -1128,19 +1186,27 @@ public class BytecodeGenerator {
         return result;
     }
 
-    /**
-     * Best-effort JVM type inference for a single AST node, used by handleCast()
-     * to determine the source descriptor for a conversion instruction.
-     */
     private String inferNodeJvmType(ASTNode node) {
         if (node == null) return "I";
         switch (node.getType()) {
-            case "NUMBER":  return inferLiteralType(node.getValue());
-            case "LITERAL": return inferLiteralType(node.getValue());
-            case "IDENTIFIER": {
-                // If the identifier is a known local, ask the slot allocator for its width.
-                // Without storing the full descriptor we fall back to "I".
-                return "I";
+            case "NUMBER":
+            case "LITERAL":    return inferLiteralType(node.getValue());
+            case "IDENTIFIER": return slotAllocator.jvmTypeOf(node.getValue()); 
+            default:           return "I";
+        }
+    }
+
+    private String inferExprJvmType(ASTNode node) {
+        if (node == null) return "I";
+        switch (node.getType()) {
+            case "NUMBER":
+            case "LITERAL":     return inferLiteralType(node.getValue());
+            case "IDENTIFIER":  return slotAllocator.jvmTypeOf(node.getValue());
+            case "INIT_VALUE":
+                return node.getChildren().isEmpty() ? "I" : inferExprJvmType(node.getChildren().get(0));
+            case "CAST": {
+                String t = toJvmDescriptor(node.getValue());
+                return t.isEmpty() ? "I" : t;
             }
             default: return "I";
         }
@@ -1173,22 +1239,24 @@ public class BytecodeGenerator {
         return result;
     }
 
-    /**
-     * FIX: Only push a return-value slot when the method is non-void.
-     * Previously stackTracker.push() was called unconditionally, inflating
-     * maxDepth by 1 for every void method call.
-     * Without a symbol table lookup here we use a conservative heuristic:
-     * if the result temp is assigned (i.e. the call is used in an expression),
-     * we push; for standalone call statements the result is discarded.
-     * The reliable fix is to look up the method's return type in the symbol table.
-     */
     private String handleMethodCall(ASTNode node) {
         ASTNode receiver    = getChildOfType(node, "RECEIVER");
         ASTNode args        = getChildOfType(node, "ARGS");
         boolean hasReceiver = receiver != null && !receiver.getChildren().isEmpty();
 
-        String objAddr = null;
+        String methodName = node.getValue();
+
+        boolean isStaticDispatch = staticMethods.contains(methodName);
         if (hasReceiver) {
+            ASTNode recvChild = receiver.getChildren().get(0);
+            if (recvChild.getType().equals("IDENTIFIER")) {
+                String recvName = recvChild.getValue();
+                if (Character.isUpperCase(recvName.charAt(0))) isStaticDispatch = true;
+            }
+        }
+
+        String objAddr = null;
+        if (hasReceiver && !isStaticDispatch) {
             objAddr = visit(receiver.getChildren().get(0));
             stackTracker.push();
         }
@@ -1203,14 +1271,16 @@ public class BytecodeGenerator {
             }
         }
 
+        String descriptor = methodDescriptors.getOrDefault(methodName, "()V");
+
         String result = newTemp();
-        if (hasReceiver) {
-            emit(Instruction.callVirtual(result, objAddr, node.getValue(), argCount));
+        if (hasReceiver && !isStaticDispatch) {
+            emit(Instruction.callVirtualWithDescriptor(result, objAddr, methodName, descriptor, argCount));
         } else {
-            emit(Instruction.call(result, node.getValue(), argCount));
+            emit(Instruction.callWithDescriptor(result, methodName, descriptor, argCount));
         }
-        stackTracker.pop(argCount + (hasReceiver ? 1 : 0));
-        stackTracker.push(); // push return value (conservative — always push 1)
+        stackTracker.pop(argCount + (hasReceiver && !isStaticDispatch ? 1 : 0));
+        stackTracker.push();
         return result;
     }
 
@@ -1276,10 +1346,6 @@ public class BytecodeGenerator {
             default:   throw new RuntimeException("Unknown binary operator: " + op);
         }
     }
-
-    // FIX: compoundOpcode() removed — it was dead code. handleAssign() has always
-    // used resolveTypedBinaryOpcode() for compound operators. Keeping two methods
-    // that appear to serve the same purpose invites maintenance confusion.
 
     private static String inferLiteralType(String literal) {
         if (literal == null || "null".equals(literal)) return "A";
