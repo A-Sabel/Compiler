@@ -255,7 +255,8 @@ public class MainGUI extends JFrame {
                 
                 // Phase 4: Optimization (optional AST-level improvements)
                 Optimizer optimizer = new Optimizer();
-                ASTNode optimizedRoot = optimizer.optimize(rootNode);
+                Optimizer.OptimizeResult optimizeResult = optimizer.optimize(rootNode);
+                ASTNode optimizedRoot = optimizeResult.node;
                 rootNode = optimizedRoot;
                 
                 long endTime = System.nanoTime();

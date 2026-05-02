@@ -214,8 +214,92 @@
   - Short-circuit evaluation for `&&` and `||` uses temp result variable written in both branches
   - Postfix increment/decrement correctly separates the "before" value (returned) from the updated value (stored back)
 
+
+## 4 Code Optimizer — Update Notes
+
+## ✅ Completed Components
+
+### Suggested Improvements
+
+- ✅ **Suggest 1 — Multi-pass architecture**
+  - All optimizations previously ran in a single recursive sweep; constants folded in child nodes did not re-trigger simplifications on the parent in the same pass (e.g. `(2 + 3) * 0` never fully resolved)
+  - `optimize()` now loops with a `changed` flag: repeats until a full pass produces no changes, guaranteeing all cascading simplifications are resolved
+
+- ✅ **Suggest 2 — Track which optimizations fired**
+  - Optimizer previously returned only an `ASTNode` with no diagnostic info about what changed
+  - Public method now returns `OptimizeResult` (carries `node`, `changed`, `ruleApplied`, and `ruleCounts` map); a private `fire(String rule)` helper records every optimization site and accumulates counts across all passes
+
+- ✅ **Suggest 3 — Preserve source coordinates on synthesized nodes**
+  - `simplifyBoolean()` and `simplifyAlgebraic()` returned raw child nodes whose coordinates pointed to the sub-expression, not the optimized site
+  - `copyCoords(ASTNode target, ASTNode site)` helper added; all surviving child returns from algebraic/boolean simplification now go through it, stamping the parent's line and column
+
+- ✅ **Suggest 4 — `BLOCK` dead-code sweep**
+  - Optimizer traversed all children of a `BLOCK` unconditionally — statements after `RETURN`, `BREAK`, or `CONTINUE` were passed to the code generator as live nodes
+  - `eliminateDeadStatementsInBlock()` now dispatched for every `BLOCK`; scans child list, finds the first terminal statement, truncates everything after it in O(n)
+
+- ✅ **Suggest 5 — Fix `removeTrailingZero()` to preserve floating-point type**
+  - `removeTrailingZero()` silently converted whole-number float results to integer strings (e.g. `3.0 - 1.0` → `"2"` instead of `"2.0"`), causing the `NUMBER` node to be inferred as `int` downstream
+  - Replaced with `formatDouble(double value, boolean isFloatContext)`; when `isFloatContext` is `true` and the result is a whole number, `.0` is always appended
+
 ---
+
+### Missing Optimizations
+
+- ✅ **Missing 1 — Unary constant folding**
+  - `UNARY_OP` nodes were never simplified even when the operand was a compile-time literal (`!true`, `-5`, `!!x` all passed through unoptimized)
+  - `foldUnary()` added and called from `optimizeNode()`; handles `!true/false` → boolean flip, `-NUMBER` → negated value, and `~~x`/`!!x` → `x` (double-negation elimination)
+
+- ✅ **Missing 2 — Constant-condition `while(true)` not handled**
+  - `eliminateFalseWhile()` only removed `while(false)`; `while(true)` produced no annotation and folded conditions were never re-checked on the while node
+  - Replaced with `eliminateConstantWhile()`: `while(false)` returns `null` (node removed), `while(true)` attaches `setAttribute("infinite_loop", "true")` for downstream phases
+
+- ✅ **Missing 3 — Dead code after `return` / `break` / `continue` in a `BLOCK`**
+  - Optimizer never pruned statements following a terminal statement within the same block, leaving dead nodes for all downstream phases to process
+  - Covered by Suggest 4 — `eliminateDeadStatementsInBlock()` handles this case
+
+- ✅ **Missing 4 — Strength reduction**
+  - No AST-level strength reduction existed; `x * 2`, `x * 4`, `x / 8` etc. were never converted to shifts even though Rule 20.3 requires it
+  - `strengthReduce()` added: detects multiply/divide where one operand is a compile-time power-of-two integer literal; replaces with `x << n` or `x >> n` using `powerOfTwoShift()` and `makeShift()`
+
+- ✅ **Missing 5 — Common subexpression elimination (CSE)**
+  - Identical pure expressions appearing multiple times in the same scope (e.g. `a + b` twice) were computed twice with no sharing
+  - `eliminateCommonSubexpression()` added as the last pass in `optimizeNode()`; uses a `cseTable` map with canonical string keys (commutative operators normalized lexicographically); first occurrence annotated with `cse_key`, second replaced with a `TEMP_REF` node; side-effecting nodes excluded via `isPureExpression()`
+
+---
+
+### Warnings
+
+- ✅ **Warning 1 — Integer overflow silently produces wrong folded constants**
+  - `evaluateNumericBinary()` used `long` arithmetic throughout, so `2000000000 + 2000000000` folded to `"4000000000"` — valid as `long` but an overflow for `int` — with no range check against the operands' inferred type
+  - `inferNumericType()` added to infer the narrowest type covering both operands; `checkIntegerRange()` tests the folded result against it; on violation, `evaluateNumericBinary()` returns `"OVERFLOW:<detail>"` and `foldConstants()` leaves the node unfolded with `setAttribute("fold_overflow", detail)` so Rule 12 still sees the original expression
+
+- ✅ **Warning 2 — `removeTrailingZero()` loses floating-point type information**
+  - `3.0 - 1.0` folded to `"2"` instead of `"2.0"`, causing the `NUMBER` node to be inferred as `int` by the semantic analyzer and code generator — a silent type-narrowing introduced by the optimizer
+  - Covered by Suggest 5 — `removeTrailingZero()` deleted and replaced with `formatDouble()`
+
+- ✅ **Warning 3 — Comparison operators not folded for numeric literals**
+  - `evaluateNumericBinary()` only handled arithmetic operators; `if (5 > 3)` was never folded to `if (true)`, so `eliminateConstantIf()` never fired for numeric comparisons even when the condition was statically known
+  - All six comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`) added to both the `long` and `double` branches of `evaluateNumericBinary()`; results returned as `"true"`/`"false"` and wrapped in a `LITERAL` node so `eliminateConstantIf()` can act on them
+
+---
+
+### Bug Fixes
+
+- ✅ **Bug 1 — Mutating `getChildren()` in place during iteration**
+  - `optimizeNode()` called `children.remove(i)` and `i--` on the list returned by `getChildren()`; if the list is the node's internal reference, removing a null-optimized node shifted indices and caused the loop to silently skip the next sibling
+  - Traversal now builds a fresh `ArrayList<ASTNode>` and calls `node.setChildren(newList)` after the loop — no in-place mutation occurs
+
+- ✅ **Bug 2 — Ternary elimination returning wrapper node instead of expression**
+  - `eliminateConstantTernary()` returned `thenWrapper` or `elseWrapper` directly (structural `THEN`/`ELSE` container nodes), not the expression inside them, causing crashes in every downstream phase that expected an expression node
+  - Wrapper is now unwrapped before returning: `thenWrapper.getChildren().get(0)` (the actual expression) is returned; same unwrap applied to `elseWrapper` for the `false` branch
+
+- ✅ **Bug 3 — `simplifyAlgebraic()` silently drops side effects on identity and zero rules**
+  - Identity rules (`x * 1`, `x + 0`, `x - 0`, `x / 1`) returned the non-literal operand without checking purity — `1 * bar()` was fine incidentally, but the guard was never explicit; multiply-by-zero (`x * 0` → `NUMBER "0"`) discarded both operands entirely, silently dropping any side effects (e.g. `sideEffect() * 0`)
+  - All identity rules now include `isPureExpression(survivingOperand)` before returning; multiply-by-zero requires `isPureExpression(left) && isPureExpression(right)` before collapsing — if either side has effects, the node is left untouched. `isPureExpression()` (already used by CSE) recursively returns `false` for any subtree containing `CALL` or `ASSIGN`
+
+---
+
 
 ## Last Updated
 
-May 2, 2026
+May 3, 2026
