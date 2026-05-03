@@ -42,6 +42,7 @@ import javax.swing.WindowConstants;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 
+import compiler.codegen.CodeGenerator;
 import compiler.lexer.Lexer;
 import compiler.lexer.SymbolTable;
 import compiler.lexer.models.Tokens;
@@ -66,6 +67,8 @@ public class MainGUI extends JFrame {
     private final JLabel executionTimeLabel;
     // Error detail list shown inside RS_Error
     private final JTextArea errorDetailArea;
+    private final JTable generatedCodeTable;
+    private final javax.swing.table.DefaultTableModel generatedCodeModel;
 
     // ResultTable replaces the old inline table logic
     private final ResultTable resultTable;
@@ -133,6 +136,21 @@ public class MainGUI extends JFrame {
         RS_Error.setLayout(new BorderLayout());
         RS_Error.add(errorCountLabel, BorderLayout.NORTH);
         RS_Error.add(errorScroll, BorderLayout.CENTER);
+
+        // Generated Code Tab Setup
+        generatedCodeModel = new javax.swing.table.DefaultTableModel(
+            new Object[][]{}, new String[]{ "Instruction", "Operands" }
+        ) {
+            @Override
+            public boolean isCellEditable(int row, int column) { return false; }
+        };
+        generatedCodeTable = new JTable(generatedCodeModel);
+        styleTableHeader(generatedCodeTable);
+        generatedCodeTable.setRowHeight(24);
+        generatedCodeTable.setShowGrid(false);
+        generatedCodeTable.setFont(new Font("Monospaced", Font.PLAIN, 14));
+        JScrollPane generatedCodeScrollPane = new JScrollPane(generatedCodeTable);
+        BottomSection.addTab("Generated Code", generatedCodeScrollPane);
 
         // Initialize all labels to zero
         updateStatLabels(0, 0, 0, 0);
@@ -207,6 +225,7 @@ public class MainGUI extends JFrame {
             currentTokens.clear();
             SymbolTable.getInstance().reset();
             ErrorHandler.clear();
+            generatedCodeModel.setRowCount(0);
             errorDetailArea.setText("");
             updateStatLabels(0, 0, 0, 0);
             logger.info("UI and Symbol Table cleared.");
@@ -259,6 +278,10 @@ public class MainGUI extends JFrame {
                 ASTNode optimizedRoot = optimizeResult.node;
                 rootNode = optimizedRoot;
                 
+                // Phase 5: Code Generation
+                CodeGenerator codeGen = new CodeGenerator();
+                String assembly = codeGen.generate(rootNode);
+                
                 long endTime = System.nanoTime();
                 long executionTimeMs = (endTime - startTime) / 1_000_000; 
                 
@@ -289,6 +312,18 @@ public class MainGUI extends JFrame {
 
                     setupTableFiltering();
                     applyTableFilter();
+
+                    // Populate the Generated Code table
+                    String[] lines = assembly.split("\n");
+                    generatedCodeModel.setRowCount(0);
+                    for (String line : lines) {
+                        if (line.trim().isEmpty()) continue;
+                        String[] parts = line.split(" ", 2);
+                        String instr = parts[0];
+                        String operands = parts.length > 1 ? parts[1] : "";
+                        generatedCodeModel.addRow(new Object[]{ instr, operands });
+                    }
+                    OutputArea.setText("CODE GENERATED SUCCESSFULLY");
 
                     // Display the accumulated errors in the GUI's Error Tab
                     if (errorCount > 0) {
