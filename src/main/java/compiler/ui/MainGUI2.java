@@ -135,6 +135,7 @@ public class MainGUI2 extends JFrame {
     private JLabel            errorCountLabel;
     private JLabel            warnCountLabel;
     private int               errorCount = 0;
+    private String            activeConsoleTab = "Console";
     
     private JLabel            consoleTabBtn;
     private JLabel            errorTabBtn;
@@ -942,9 +943,9 @@ public class MainGUI2 extends JFrame {
         JPanel tabsLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         tabsLeft.setOpaque(false);
         
-        consoleTabBtn = buildConsoleTabLbl(">_  Console", true);
-        errorCountLabel = buildConsoleTabLbl("\u26A0  Errors (0)", false);
-        warnCountLabel  = buildConsoleTabLbl("\u24D8  Warnings (0)", false);
+        consoleTabBtn = buildConsoleTabLbl(">_  Console", "Console");
+        errorCountLabel = buildConsoleTabLbl("\u26A0  Errors (0)", "Errors");
+        warnCountLabel  = buildConsoleTabLbl("\u24D8  Warnings (0)", "Warnings");
         
         // Tab Switching Logic
         consoleTabBtn.addMouseListener(new MouseAdapter() { 
@@ -1032,11 +1033,13 @@ public class MainGUI2 extends JFrame {
         return p;
     }
 
-    private JLabel buildConsoleTabLbl(String text, boolean active) {
+    private JLabel buildConsoleTabLbl(String text, String cardName) {
         JLabel lbl = new JLabel(text) {
             @Override protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g;
-                if (active) {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                boolean isActive = cardName.equals(activeConsoleTab);
+                if (isActive) {
                     g2.setColor(consoleBg());
                     g2.fillRect(0, 0, getWidth(), getHeight());
                     // VSCode-style top blue indicator
@@ -1047,9 +1050,10 @@ public class MainGUI2 extends JFrame {
             }
         };
         lbl.setFont(FONT_UI_SM);
-        lbl.setForeground(active ? new Color(0xCCCCCC) : new Color(0x858585));
+        lbl.setForeground(cardName.equals(activeConsoleTab) ? new Color(0xCCCCCC) : new Color(0x858585));
         lbl.setBorder(BorderFactory.createEmptyBorder(6, 14, 6, 14));
         lbl.setOpaque(false);
+        lbl.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         return lbl;
     }
 
@@ -1077,12 +1081,10 @@ public class MainGUI2 extends JFrame {
     }
 
     private void switchConsoleCard(String cardName) {
+        activeConsoleTab = cardName;
         consoleLayout.show(consoleCardPanel, cardName);
-        // Update labels visibility/active style
-        consoleTabBtn.setForeground(cardName.equals("Console")  ? new Color(0xCCCCCC) : new Color(0x858585));
-        errorCountLabel.setForeground(cardName.equals("Errors") ? new Color(0xCCCCCC) : new Color(0x858585));
-        warnCountLabel.setForeground(cardName.equals("Warnings") ? new Color(0xCCCCCC) : new Color(0x858585));
-        
+        updateConsoleCounts();
+
         // Force redraw for active indicator (blue line)
         consoleTabBtn.repaint();
         errorCountLabel.repaint();
@@ -1121,12 +1123,14 @@ public class MainGUI2 extends JFrame {
     private void updateConsoleCounts() {
         if (errorCountLabel != null) {
             errorCountLabel.setText("\u26A0  Errors (" + errorCount + ")");
-            // If errors exist, highlight label in red
-            errorCountLabel.setForeground(errorCount > 0 ? ERROR_RED : new Color(0x858585));
+            errorCountLabel.setForeground(activeConsoleTab.equals("Errors") ? new Color(0xCCCCCC) : new Color(0x858585));
         }
         if (warnCountLabel != null) {
             warnCountLabel.setText("\u24D8  Warnings (" + warnCount + ")");
-            warnCountLabel.setForeground(warnCount > 0 ? WARNING_YELLOW : new Color(0x858585));
+            warnCountLabel.setForeground(activeConsoleTab.equals("Warnings") ? new Color(0xCCCCCC) : new Color(0x858585));
+        }
+        if (consoleTabBtn != null) {
+            consoleTabBtn.setForeground(activeConsoleTab.equals("Console") ? new Color(0xCCCCCC) : new Color(0x858585));
         }
     }
 
