@@ -14,6 +14,7 @@ public final class Instruction {
         MUL,            // result = left * right
         DIV,            // result = left / right
         MOD,            // result = left % right
+        POW,            // result = left ** right (exponentiation)
 
         // ── TAC unary ────────────────────────────────────────────────────────
         NEG,            // result = - operand
@@ -56,6 +57,7 @@ public final class Instruction {
 
         // ── TAC objects ───────────────────────────────────────────────────────
         NEW,            // result = new <type>(<argCount args already emitted as ARG)
+        NEW_ARRAY,      // result = new <elementType>[<size>]
         PRINT,          // print <argCount args already emitted as ARG>
 
         // ── TAC class structure ───────────────────────────────────────────────
@@ -218,6 +220,10 @@ public final class Instruction {
         return new Instruction(Opcode.NEW, result, type, String.valueOf(argCount), null);
     }
 
+    public static Instruction newArray(String result, String elementType, String size) {
+        return new Instruction(Opcode.NEW_ARRAY, result, elementType, size, null);
+    }
+
     public static Instruction print(int argCount) {
         return new Instruction(Opcode.PRINT, null, String.valueOf(argCount), null, null);
     }
@@ -375,6 +381,7 @@ public final class Instruction {
             case RETURN:        return "return";
             case RETURN_VALUE:  return "return " + arg1;
             case NEW:           return result + " = new " + arg1 + "(" + op + " args)";
+            case NEW_ARRAY:     return result + " = new " + arg1 + "[" + op + "]";
             case PRINT:         return "print " + arg1;
             case CLASS:         return "class " + arg1;
 

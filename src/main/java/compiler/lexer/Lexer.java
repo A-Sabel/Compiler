@@ -309,7 +309,7 @@ import compiler.util.ErrorHandler;
                 (current == '|' && (next == '|' || next == '=')) ||
                 (current == '^' && next == '=') ||
                 (current == '%' && next == '=') ||
-                (current == '*' && next == '=') ||
+                (current == '*' && (next == '*' || next == '=')) ||
                 (current == '/' && next == '=') ||
                 (current == ':' && next == ':') // Method Reference
             ) {

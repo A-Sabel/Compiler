@@ -63,7 +63,8 @@ public class Interpreter {
                         break;
 
                     case ARG: {
-                        context.pendingArgs.add(resolveValue(instr.getArg1(), context));
+                        Object val = resolveValue(instr.getArg1(), context);
+                        context.pendingArgs.add(val);
                         break;
                     }
 
@@ -132,6 +133,18 @@ public class Interpreter {
                         break;
                     }
 
+                    case NEW_ARRAY: {
+                        String elementType = instr.getArg1();
+                        Object sizeObj = resolveValue(instr.getOp(), context);
+                        int size = toNumber(sizeObj).intValue();
+                        List<Object> array = new ArrayList<>();
+                        for (int i = 0; i < size; i++) {
+                            array.add(null); // Initialize with nulls
+                        }
+                        context.temps.put(instr.getResult(), array);
+                        break;
+                    }
+
                     case CONST_PUSH: {
                         context.temps.put(instr.getResult(), parseLiteral(instr.getArg1()));
                         break;
@@ -165,6 +178,18 @@ public class Interpreter {
                         else if (opcode == Opcode.IMUL) result = left * right;
                         else if (opcode == Opcode.IDIV) result = left / right;
                         else result = left % right;
+                        context.temps.put(instr.getResult(), (int) result);
+                        break;
+                    }
+
+                    case POW: {
+                        Object a = resolveValue(instr.getArg1(), context);
+                        Object b = resolveValue(instr.getArg2(), context);
+                        Number an = toNumber(a);
+                        Number bn = toNumber(b);
+                        double base = an.doubleValue();
+                        double exponent = bn.doubleValue();
+                        double result = Math.pow(base, exponent);
                         context.temps.put(instr.getResult(), (int) result);
                         break;
                     }
@@ -323,6 +348,15 @@ public class Interpreter {
             }
             System.out.println();
             return null;
+        }
+
+        if ("pow".equals(name)) {
+            if (args.size() < 2) {
+                throw new RuntimeException("pow() requires 2 arguments");
+            }
+            Number base = toNumber(args.get(0));
+            Number exponent = toNumber(args.get(1));
+            return (int) Math.pow(base.doubleValue(), exponent.doubleValue());
         }
 
         MethodInfo method = lookupMethod(name, descriptor);

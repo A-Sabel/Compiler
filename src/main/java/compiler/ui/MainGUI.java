@@ -303,9 +303,14 @@ public class MainGUI extends JFrame {
                         System.setOut(capture);
                         System.setErr(capture);
                         Interpreter interpreter = new Interpreter();
-                        Object result = interpreter.execute(instructions);
-                        if (result != null) {
-                            capture.println(result);
+                        try {
+                            Object result = interpreter.execute(instructions);
+                            if (result != null) {
+                                capture.println(result);
+                            }
+                        } catch (Exception ex) {
+                            capture.println("[Runtime Error] " + ex.getMessage());
+                            ex.printStackTrace(capture);
                         }
                     } finally {
                         System.setOut(originalOut);
