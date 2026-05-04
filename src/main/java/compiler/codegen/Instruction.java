@@ -61,6 +61,7 @@ public final class Instruction {
         // ── TAC class structure ───────────────────────────────────────────────
         CLASS,          // class <name>
         MAX_STACK,
+        HALT,
         MAX_LOCALS,
         LDC,
         INTERN_STRING,
@@ -69,6 +70,9 @@ public final class Instruction {
         LADD, LSUB, LMUL, LDIV, LMOD,   // long
         FADD, FSUB, FMUL, FDIV, FMOD,   // float
         DADD, DSUB, DMUL, DDIV, DMOD,   // double
+
+        IAND, LOR, IXOR,                 // bitwise AND, OR, XOR (integer)
+        ISHL, ISHR, IUSHR,              // shift operations (logical/arithmetic shift right)
 
         ILOAD, LLOAD, FLOAD, DLOAD, ALOAD,    // local-variable loads
         ISTORE, LSTORE, FSTORE, DSTORE, ASTORE, // local-variable stores
@@ -83,8 +87,6 @@ public final class Instruction {
         CONVERT,
         FOLDED_CONST,
         DUP,
-        ISHL,
-        ISHR,
         LINE_NUMBER,
         LOCAL_VAR_TABLE,
         SOURCE_FILE,
@@ -334,6 +336,7 @@ public final class Instruction {
             case EQUAL: case NOT_EQUAL:
             case LESS_THAN: case LESS_EQUAL:
             case GREATER_THAN: case GREATER_EQUAL:
+            case IAND: case LOR: case IXOR: case ISHL: case ISHR: case IUSHR:
                 return result + " = " + arg1 + " " + op + " " + arg2;
 
             case NEG:           return result + " = -" + arg1;
@@ -405,8 +408,6 @@ public final class Instruction {
             case FOLDED_CONST:          return result + " = " + arg1 + "  ; folded";
 
             case DUP:           return (result != null ? result + " = " : "") + "dup";
-            case ISHL:          return result + " = " + arg1 + " << " + op;
-            case ISHR:          return result + " = " + arg1 + " >> " + op;
 
             case LINE_NUMBER:           return ".line " + op + "  ; offset=" + arg1;
             case LOCAL_VAR_TABLE:       return ".local [" + arg1 + "] " + op + " : " + arg2;
