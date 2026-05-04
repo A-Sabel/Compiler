@@ -1,38 +1,84 @@
 package compiler.ui;
-import javax.swing.*;
-import javax.swing.border.*;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
-import javax.swing.plaf.basic.BasicSplitPaneDivider;
-import javax.swing.table.*;
-import javax.swing.text.*;
-import java.awt.*;
-import java.awt.event.*;
-import java.awt.geom.*;
-import java.util.HashMap;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
+import java.awt.BorderLayout;
+import java.awt.CardLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.GradientPaint;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.GridLayout;
+import java.awt.Insets;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.Toolkit;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.StringSelection;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.awt.datatransfer.StringSelection;
-import java.awt.datatransfer.Clipboard;
-import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
-import compiler.util.ErrorHandler;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.DefaultListModel;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JFileChooser;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollBar;
+import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
+import javax.swing.JTabbedPane;
+import javax.swing.JTable;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+import javax.swing.JTree;
+import javax.swing.RowFilter;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.plaf.basic.BasicSplitPaneDivider;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.table.JTableHeader;
+import javax.swing.table.TableRowSorter;
+import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeCellRenderer;
+import javax.swing.tree.DefaultTreeModel;
+import javax.swing.tree.TreeSelectionModel;
+
 import compiler.CompilerPipeline;
-import compiler.lexer.SymbolTable;
 import compiler.codegen.Instruction;
+import compiler.lexer.SymbolTable;
+import compiler.util.ErrorHandler;
 import compiler.vm.Interpreter;
 
 public class MainGUI2 extends JFrame {
 
     // ── Dark / Light Theme Toggle ─────────────────────────────────────────────
-    private boolean isDarkMode = true; // Default dark mode like VSCode
+    private boolean isDarkMode = true;
 
-    // ── Light palette (Updated for better contrast) ───────────────────────────
+    // ── Light palette ─────────────────────────────────────────────────────────
     private static final Color L_BG_WHITE        = new Color(0xFFFFFF);
     private static final Color L_BG_LIGHT        = new Color(0xF3F3F3);
     private static final Color L_BG_PANEL        = new Color(0xFAFAFA);
@@ -77,9 +123,6 @@ public class MainGUI2 extends JFrame {
     private static final Color WARNING_YELLOW   = new Color(0xCCA700);
     private static final Color ERROR_RED        = new Color(0xF14C4C);
     private static final Color INFO_BLUE        = new Color(0x75BEFF);
-    private static final Color KEYWORD_PURPLE   = new Color(0xC586C0);
-    private static final Color STRING_ORANGE    = new Color(0xCE9178);
-    private static final Color COMMENT_GREEN    = new Color(0x6A9955);
 
     // ── Dynamic color accessors ───────────────────────────────────────────────
     private Color bg()         { return isDarkMode ? D_BG_WHITE        : L_BG_WHITE; }
@@ -114,14 +157,17 @@ public class MainGUI2 extends JFrame {
     private JTextArea         codeEditor;
     private JTabbedPane       outputTabs;
     private JTextArea         consoleArea;
-    
+
+    // FIX #2: errorListModel/warningListModel declared here but reset properly in buildUI()
     private DefaultListModel<String> errorListModel   = new DefaultListModel<>();
-    private JList<String>            errorList        = new JList<>(errorListModel);
+    private JList<String>            errorList;          // initialized in buildConsole()
     private DefaultListModel<String> warningListModel = new DefaultListModel<>();
-    private JList<String>            warningList      = new JList<>(warningListModel);
+    private JList<String>            warningList;         // initialized in buildConsole()
+
     private JPanel                   consoleCardPanel;
     private CardLayout               consoleLayout;
 
+    // FIX #6: lnColLabel is always re-created in buildUI() to avoid stale parent issues
     private JLabel            lnColLabel;
     private JTextField        searchField;
     private JComboBox<String> filterCombo;
@@ -136,11 +182,13 @@ public class MainGUI2 extends JFrame {
     private JLabel            warnCountLabel;
     private int               errorCount = 0;
     private String            activeConsoleTab = "Console";
-    
+
     private JLabel            consoleTabBtn;
-    private JLabel            errorTabBtn;
-    private JLabel            warnTabBtn;
     private int               warnCount  = 0;
+
+    // AST tree model — reset on each run
+    private DefaultTreeModel  astTreeModel;
+    private JTree             astTree;
 
     // =========================================================================
     public static void main(String[] args) {
@@ -158,13 +206,22 @@ public class MainGUI2 extends JFrame {
     }
 
     private void buildUI() {
+        // Preserve editor content across theme rebuilds
         String savedCode = (codeEditor != null) ? codeEditor.getText() : null;
+
+        // FIX #2: Reset list models and re-create lists fresh on every buildUI() call
+        errorListModel   = new DefaultListModel<>();
+        warningListModel = new DefaultListModel<>();
+        errorList        = new JList<>(errorListModel);
+        warningList      = new JList<>(warningListModel);
+
+        // FIX #6: Always re-create lnColLabel so it has no stale parent
+        lnColLabel = new JLabel("Ln 1, Col 1");
+
+        // Always re-create codeEditor so layout is clean
+        codeEditor = new JTextArea();
+
         getContentPane().removeAll();
-        
-        // Re-initialize codeEditor early to ensure font availability for line numbers
-        if (codeEditor == null) {
-            codeEditor = new JTextArea();
-        }
         setBackground(bg());
 
         rootPanel = new JPanel(new BorderLayout(0, 0));
@@ -176,9 +233,10 @@ public class MainGUI2 extends JFrame {
 
         setContentPane(rootPanel);
 
+        // Restore or set default code
         if (savedCode != null && !savedCode.isEmpty()) {
             codeEditor.setText(savedCode);
-        } else if (codeEditor != null) {
+        } else {
             codeEditor.setText(
                 "void main() {\n" +
                 "    int a = 10;\n" +
@@ -194,7 +252,7 @@ public class MainGUI2 extends JFrame {
     }
 
     // =========================================================================
-    //  HEADER  (VSCode-style activity bar + title bar)
+    //  HEADER
     // =========================================================================
     private JPanel buildHeader() {
         JPanel header = new JPanel(new BorderLayout()) {
@@ -202,7 +260,7 @@ public class MainGUI2 extends JFrame {
                 super.paintComponent(g);
                 g.setColor(headerBg());
                 g.fillRect(0, 0, getWidth(), getHeight());
-                g.setColor(isDarkMode ? new Color(0x1A1A1A) : new Color(0x1A1A1A));
+                g.setColor(new Color(0x1A1A1A));
                 g.drawLine(0, getHeight()-1, getWidth(), getHeight()-1);
             }
         };
@@ -210,11 +268,9 @@ public class MainGUI2 extends JFrame {
         header.setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 12));
         header.setOpaque(false);
 
-        // ── Left: Logo + Title ────────────────────────────────────────────────
         JPanel left = new JPanel(new GridBagLayout());
         left.setOpaque(false);
 
-        // VSCode-style logo box
         JPanel logoBox = new JPanel() {
             @Override protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g;
@@ -222,7 +278,6 @@ public class MainGUI2 extends JFrame {
                 GradientPaint gp = new GradientPaint(0, 0, new Color(0x0098FF), getWidth(), getHeight(), new Color(0x006EBD));
                 g2.setPaint(gp);
                 g2.fillRoundRect(0, 0, getWidth(), getHeight(), 6, 6);
-                // VSCode-like icon (two angle brackets)
                 g2.setColor(Color.WHITE);
                 g2.setFont(new Font("Consolas", Font.BOLD, 16));
                 FontMetrics fm = g2.getFontMetrics();
@@ -247,27 +302,24 @@ public class MainGUI2 extends JFrame {
         gbc.anchor = GridBagConstraints.WEST;
         gbc.insets = new Insets(0, 0, 0, 12);
         left.add(logoBox, gbc);
-        
         gbc.insets = new Insets(0, 0, 0, 0);
         left.add(titlePanel, gbc);
 
-        // ── Right: VSCode-style action buttons ────────────────────────────────
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         right.setOpaque(false);
 
-        JButton newBtn = buildHeaderBtn("New File", "\uE001", false, "New Project (Ctrl+N)");
+        JButton newBtn = buildHeaderBtn("New File", "", false, "New Project (Ctrl+N)");
         newBtn.addActionListener(e -> handleNewFile());
         right.add(newBtn);
 
-        JButton openBtn = buildHeaderBtn("Open", "\uE178", false, "Load File (Ctrl+O)");
+        JButton openBtn = buildHeaderBtn("Open", "", false, "Load File (Ctrl+O)");
         openBtn.addActionListener(e -> handleOpenFile());
         right.add(openBtn);
 
-        JButton runBtn = buildHeaderBtn("Run", "\uE037", true, "Run Compiler (F5)");
+        JButton runBtn = buildHeaderBtn("Run", "", true, "Run Compiler (F5)");
         runBtn.addActionListener(e -> handleRunAction());
         right.add(runBtn);
 
-        // Divider
         JPanel div = new JPanel() {
             @Override protected void paintComponent(Graphics g) {
                 g.setColor(new Color(0x555555));
@@ -287,13 +339,11 @@ public class MainGUI2 extends JFrame {
         return header;
     }
 
-    // VSCode-style header button with SVG-like Unicode icons
     private JButton buildHeaderBtn(String label, String iconChar, boolean primary, String tooltip) {
-        // Use clean unicode chars that look like VSCode icons
         String iconText = switch (label) {
-            case "New File" -> "\uD83D\uDCC4"; // 📄
-            case "Open"     -> "\uD83D\uDCC2"; // 📂
-            case "Run"      -> "\u25B6";        // ▶
+            case "New File" -> "\uD83D\uDCC4";
+            case "Open"     -> "\uD83D\uDCC2";
+            case "Run"      -> "\u25B6";
             default         -> iconChar;
         };
 
@@ -324,13 +374,11 @@ public class MainGUI2 extends JFrame {
                     g2.drawRoundRect(0, 0, getWidth()-1, getHeight()-1, 5, 5);
                 }
 
-                // Draw icon
                 g2.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 13));
                 g2.setColor(fg);
                 FontMetrics fm = g2.getFontMetrics();
                 int iconW = fm.stringWidth(iconText);
 
-                // Draw text label
                 g2.setFont(FONT_UI_SM);
                 FontMetrics fm2 = g2.getFontMetrics();
                 int labelW = fm2.stringWidth(label);
@@ -368,7 +416,7 @@ public class MainGUI2 extends JFrame {
                     g2.fillRoundRect(0, 0, getWidth(), getHeight(), 5, 5);
                 }
 
-                String icon  = isDarkMode ? "\u2600" : "\uD83C\uDF19"; // ☀ or 🌙
+                String icon  = isDarkMode ? "\u2600" : "\uD83C\uDF19";
                 String label = isDarkMode ? " Light" : " Dark";
 
                 g2.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 13));
@@ -439,15 +487,11 @@ public class MainGUI2 extends JFrame {
     private JSplitPane buildCenter() {
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
                 buildTopArea(), buildConsole());
-        split.setResizeWeight(0.70); // 70% top area, 30% console
+        split.setResizeWeight(0.70);
         split.setDividerSize(4);
         split.setBorder(null);
         split.setBackground(bg());
-        // Ensure initial location is set correctly
-        SwingUtilities.invokeLater(() -> {
-            split.setDividerLocation(0.70);
-        });
-
+        SwingUtilities.invokeLater(() -> split.setDividerLocation(0.70));
         styleDivider(split);
         return split;
     }
@@ -455,15 +499,11 @@ public class MainGUI2 extends JFrame {
     private JSplitPane buildTopArea() {
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
                 buildEditorPanel(), buildOutputPanel());
-        split.setResizeWeight(0.60); // 60% editor, 40% output area
+        split.setResizeWeight(0.60);
         split.setDividerSize(4);
         split.setBorder(null);
         split.setBackground(bg());
-        // Ensure initial location is set correctly
-        SwingUtilities.invokeLater(() -> {
-            split.setDividerLocation(0.60);
-        });
-
+        SwingUtilities.invokeLater(() -> split.setDividerLocation(0.60));
         styleDivider(split);
         return split;
     }
@@ -486,7 +526,6 @@ public class MainGUI2 extends JFrame {
         JPanel p = new JPanel(new BorderLayout(0, 0));
         p.setBackground(bg());
 
-        // ── Tab bar (VSCode explorer-like) ────────────────────────────────────
         JPanel tabBar = new JPanel(new BorderLayout()) {
             @Override protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
@@ -496,17 +535,14 @@ public class MainGUI2 extends JFrame {
                 g.drawLine(0, getHeight()-1, getWidth(), getHeight()-1);
             }
         };
-        tabBar.setPreferredSize(new Dimension(0, 35)); // Aligned with Output header
+        tabBar.setPreferredSize(new Dimension(0, 35));
         tabBar.setOpaque(false);
 
-        // Active tab with VSCode look
         JPanel fileTab = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0)) {
             @Override protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g;
-                // active tab has bg() background
                 g2.setColor(bg());
                 g2.fillRect(0, 0, getWidth(), getHeight());
-                // top orange accent line (like VSCode active tab)
                 g2.setColor(VSCODE_BLUE);
                 g2.fillRect(0, 0, getWidth(), 2);
             }
@@ -515,12 +551,10 @@ public class MainGUI2 extends JFrame {
         fileTab.setOpaque(false);
         fileTab.setBorder(BorderFactory.createEmptyBorder(4, 8, 0, 8));
 
-        // C file icon (mimics VSCode C file icon)
         JLabel fileIcon = new JLabel() {
             @Override protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g;
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                // Draw a small file-like icon with "C" in blue
                 g2.setColor(new Color(0x519ABA));
                 g2.setFont(new Font("Segoe UI", Font.BOLD, 11));
                 g2.drawString("C", 0, 13);
@@ -528,11 +562,11 @@ public class MainGUI2 extends JFrame {
         };
         fileIcon.setPreferredSize(new Dimension(14, 16));
 
-        JLabel fileName = new JLabel("main.c");
-        fileName.setFont(FONT_UI_B); // Make "main.c" text bold
+        JLabel fileName = new JLabel("main.java");
+        fileName.setFont(FONT_UI_B);
         fileName.setForeground(new Color(0xCCCCCC));
 
-        JLabel closeBtn = new JLabel("\u00D7"); // ×
+        JLabel closeBtn = new JLabel("\u00D7");
         closeBtn.setFont(new Font("Segoe UI", Font.PLAIN, 14));
         closeBtn.setForeground(new Color(0x858585));
         closeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -544,15 +578,14 @@ public class MainGUI2 extends JFrame {
         fileTab.add(fileIcon); fileTab.add(fileName); fileTab.add(closeBtn);
         tabBar.add(fileTab, BorderLayout.WEST);
 
-        // Editor toolbar (right side of tab bar)
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 6));
         toolbar.setOpaque(false);
-        toolbar.add(buildEditorBtn("\uD83D\uDCCB", "Copy",  "Copy to clipboard"));  // 📋
-        toolbar.add(buildEditorBtn("\uD83D\uDCE4", "Export", "Export file"));         // 📤
-        toolbar.add(buildEditorBtn("\uD83D\uDDD1", "Clear",  "Clear editor"));        // 🗑
+        toolbar.add(buildEditorBtn("\uD83D\uDCCB", "Copy",   "Copy to clipboard"));
+        toolbar.add(buildEditorBtn("\uD83D\uDCE4", "Export", "Export file"));
+        toolbar.add(buildEditorBtn("\uD83D\uDDD1", "Clear",  "Clear editor"));
         tabBar.add(toolbar, BorderLayout.EAST);
 
-        // ── Code editor ───────────────────────────────────────────────────────
+        // FIX #6: codeEditor is always fresh at this point (re-created in buildUI())
         codeEditor.setFont(FONT_MONO);
         codeEditor.setBackground(bg());
         codeEditor.setForeground(isDarkMode ? new Color(0xD4D4D4) : Color.BLACK);
@@ -562,26 +595,24 @@ public class MainGUI2 extends JFrame {
         codeEditor.setTabSize(4);
         codeEditor.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
 
-        // Ln/Col Logic
-        if (lnColLabel == null) lnColLabel = new JLabel("Ln 1, Col 1");
+        // lnColLabel is always fresh (re-created in buildUI()), safe to use here
         codeEditor.addCaretListener(e -> {
             try {
                 int pos  = codeEditor.getCaretPosition();
                 int line = codeEditor.getLineOfOffset(pos);
                 int col  = pos - codeEditor.getLineStartOffset(line);
-                if (lnColLabel != null) lnColLabel.setText("Ln " + (line+1) + ", Col " + (col+1));
+                lnColLabel.setText("Ln " + (line+1) + ", Col " + (col+1));
             } catch (Exception ignored) {}
         });
 
+        // FIX #7: Use getPreferredSize() safely — LineNumberComponent now defers height
         LineNumberComponent lnc = new LineNumberComponent(codeEditor,
             lineNumBg(), lineNumFg(), border());
         JScrollPane scroll = new JScrollPane(codeEditor);
         scroll.setRowHeaderView(lnc);
-        scroll.setBorder(null); // Fix: Remove right border to align with SplitPane divider
+        scroll.setBorder(null);
         scroll.getViewport().setBackground(bg());
         scroll.getVerticalScrollBar().setUnitIncrement(16);
-
-        // Custom scrollbar styling
         styleScrollBar(scroll.getVerticalScrollBar());
         styleScrollBar(scroll.getHorizontalScrollBar());
 
@@ -599,24 +630,22 @@ public class MainGUI2 extends JFrame {
                     g2.setColor(isDarkMode ? new Color(0x2A2D2E) : new Color(0xE8E8E8));
                     g2.fillRoundRect(0, 0, getWidth(), getHeight(), 4, 4);
                 }
-                String iconText = icon;
-                String labelText = label;
                 g2.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 13));
                 g2.setColor(new Color(0x858585));
                 FontMetrics fm = g2.getFontMetrics();
-                int iconW = fm.stringWidth(iconText);
+                int iconW = fm.stringWidth(icon);
                 g2.setFont(FONT_UI_SM);
                 FontMetrics fm2 = g2.getFontMetrics();
-                int labelW = fm2.stringWidth(labelText);
+                int labelW = fm2.stringWidth(label);
                 int totalW = iconW + 5 + labelW;
                 int startX = (getWidth() - totalW) / 2;
                 int baseY  = (getHeight() + fm2.getAscent() - fm2.getDescent()) / 2 - 1;
                 g2.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 13));
                 g2.setColor(new Color(0x858585));
-                g2.drawString(iconText, startX, baseY);
+                g2.drawString(icon, startX, baseY);
                 g2.setFont(FONT_UI_SM);
                 g2.setColor(new Color(0x858585));
-                g2.drawString(labelText, startX + iconW + 5, baseY);
+                g2.drawString(label, startX + iconW + 5, baseY);
             }
         };
         btn.setPreferredSize(new Dimension(100, 26));
@@ -625,7 +654,6 @@ public class MainGUI2 extends JFrame {
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btn.setToolTipText(tooltip);
 
-        // Wire up buttons
         if (label.equals("Copy")) {
             btn.addActionListener(e -> handleCopyAction());
         } else if (label.equals("Export")) {
@@ -641,7 +669,6 @@ public class MainGUI2 extends JFrame {
         JPanel p = new JPanel(new BorderLayout(0, 0));
         p.setBackground(bg());
 
-        // Header bar
         JPanel outputHeader = new JPanel() {
             @Override protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
@@ -651,14 +678,13 @@ public class MainGUI2 extends JFrame {
                 g.drawLine(0, getHeight()-1, getWidth(), getHeight()-1);
             }
         };
-        outputHeader.setPreferredSize(new Dimension(0, 35)); // Aligned with Editor tab bar
+        outputHeader.setPreferredSize(new Dimension(0, 35));
         outputHeader.setLayout(new BorderLayout());
         outputHeader.setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 10));
 
         JPanel headerLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        headerLeft.setOpaque(false); // Changed from true to false
+        headerLeft.setOpaque(false);
 
-        // Colored dot indicators (like VSCode)
         JPanel dots = new JPanel() {
             @Override protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g;
@@ -678,9 +704,10 @@ public class MainGUI2 extends JFrame {
         headerLeft.add(dots); headerLeft.add(outputTitle);
         outputHeader.add(headerLeft, BorderLayout.WEST);
 
-        // Tab definitions — Sequence: Runtime Output -> Symbol Table -> Generated Code
-        String[][] tabs = { // Reordered per request
+        // NEW: Added "AST Tree" tab
+        String[][] tabs = {
             {"\u25B6", "Runtime Output"},
+            {"\uD83C\uDF32", "AST Tree"},
             {"\u25A3", "Symbol Table"},
             {"{ }", "Generated Code"}
         };
@@ -708,10 +735,10 @@ public class MainGUI2 extends JFrame {
                     int idx, int x, int y, int w, int h, boolean sel) {
                 if (sel) {
                     g.setColor(VSCODE_BLUE);
-                    g.fillRect(x, y, w, 2); // top blue indicator line
+                    g.fillRect(x, y, w, 2);
                 }
                 g.setColor(border());
-                g.drawLine(x+w, y, x+w, y+h); // right border between tabs
+                g.drawLine(x+w, y, x+w, y+h);
             }
             @Override protected void paintFocusIndicator(Graphics g, int tp,
                     Rectangle[] rs, int idx, Rectangle ir, Rectangle tr, boolean sel) {}
@@ -721,8 +748,9 @@ public class MainGUI2 extends JFrame {
         });
 
         outputTabs.addTab(tabs[0][1], buildRuntimeOutputPanel());
-        outputTabs.addTab(tabs[1][1], buildSymbolTablePanel());
-        outputTabs.addTab(tabs[2][1], buildGeneratedCodePanel());
+        outputTabs.addTab(tabs[1][1], buildAstTreePanel());          // NEW
+        outputTabs.addTab(tabs[2][1], buildSymbolTablePanel());
+        outputTabs.addTab(tabs[3][1], buildGeneratedCodePanel());
 
         for (int i = 0; i < outputTabs.getTabCount(); i++) {
             final int idx = i;
@@ -740,7 +768,7 @@ public class MainGUI2 extends JFrame {
             iconLbl.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 11));
             iconLbl.setForeground(sel ? new Color(0xCCCCCC) : outTabFg());
             JLabel nameLbl = new JLabel(tabs[i][1]);
-            nameLbl.setFont(FONT_UI_B); // Always apply bold to tab text
+            nameLbl.setFont(FONT_UI_B);
             nameLbl.setForeground(sel ? new Color(0xCCCCCC) : outTabFg());
 
             tabComp.add(iconLbl); tabComp.add(nameLbl);
@@ -776,12 +804,14 @@ public class MainGUI2 extends JFrame {
         p.setBackground(bg());
         p.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
 
-        // ── Search + Filter toolbar ──────────────────────────────────────────
         JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
         bar.setOpaque(false);
 
-        // Category Filter
-        filterCombo = new JComboBox<>(new String[]{ "All Categories", "KEYWORD", "IDENTIFIER", "CONSTANT", "LITERAL", "OPERATOR", "PUNCTUATION" });
+        // FIX #4: Corrected column names to match what we actually populate:
+        // col 0 = Category (token type), col 1 = Lexeme, col 2 = Attribute-Value
+        filterCombo = new JComboBox<>(new String[]{
+            "All Categories", "keyword", "identifier", "constant", "literal", "operator", "punctuation"
+        });
         filterCombo.setFont(FONT_UI_SM);
         filterCombo.addActionListener(e -> applySymbolFilter());
 
@@ -798,8 +828,8 @@ public class MainGUI2 extends JFrame {
             BorderFactory.createLineBorder(border()),
             BorderFactory.createEmptyBorder(3, 6, 3, 6)));
         searchField.getDocument().addDocumentListener(new DocumentListener() {
-            public void insertUpdate(DocumentEvent e) { applySymbolFilter(); }
-            public void removeUpdate(DocumentEvent e) { applySymbolFilter(); }
+            public void insertUpdate(DocumentEvent e)  { applySymbolFilter(); }
+            public void removeUpdate(DocumentEvent e)  { applySymbolFilter(); }
             public void changedUpdate(DocumentEvent e) { applySymbolFilter(); }
         });
 
@@ -807,13 +837,15 @@ public class MainGUI2 extends JFrame {
         bar.add(Box.createHorizontalStrut(10));
         bar.add(searchIcon); bar.add(searchLbl); bar.add(searchField);
 
-        String[] cols = {"Regular Expression", "Token", "Attribute-Value"};
+        // FIX #4: Column order: Category | Lexeme | Attribute-Value
+        // (was "Regular Expression | Token | Attribute-Value" which put lexeme in col 0)
+        String[] cols = {"Category", "Lexeme", "Attribute-Value"};
         symbolModel = new DefaultTableModel(cols, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         JTable sym = new JTable(symbolModel);
         styleTable(sym);
-        
+
         symbolSorter = new TableRowSorter<>(symbolModel);
         sym.setRowSorter(symbolSorter);
 
@@ -827,50 +859,26 @@ public class MainGUI2 extends JFrame {
         return p;
     }
 
+    // FIX #4: Filter now correctly checks col 0 (Category) and col 1 (Lexeme)
     private void applySymbolFilter() {
         if (symbolSorter == null) return;
-        String text = searchField.getText().toLowerCase();
-        String category = (String) filterCombo.getSelectedItem();
+        String text     = searchField != null ? searchField.getText().toLowerCase() : "";
+        String category = filterCombo != null ? (String) filterCombo.getSelectedItem() : "All Categories";
 
         RowFilter<DefaultTableModel, Object> rf = new RowFilter<>() {
             @Override
             public boolean include(Entry<? extends DefaultTableModel, ?> entry) {
-                String cat = entry.getStringValue(0);
-                String lex = entry.getStringValue(1).toLowerCase();
+                // col 0 = Category, col 1 = Lexeme
+                String cat   = entry.getStringValue(0).toLowerCase();
+                String lexeme = entry.getStringValue(1).toLowerCase();
 
-                boolean matchesLex = lex.contains(text);
-                boolean matchesCat = category.equals("All Categories") || cat.equals(category);
+                boolean matchesLex = text.isEmpty() || lexeme.contains(text);
+                boolean matchesCat = "All Categories".equals(category)
+                                     || cat.equals(category.toLowerCase());
                 return matchesLex && matchesCat;
             }
         };
         symbolSorter.setRowFilter(rf);
-    }
-
-    private JButton buildSmallActionBtn(String text) {
-        JButton btn = new JButton(text) {
-            @Override protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g;
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                Color bgC = getModel().isRollover()
-                    ? (isDarkMode ? new Color(0x37373D) : new Color(0xE8E8E8))
-                    : bgPanel();
-                g2.setColor(bgC);
-                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 4, 4);
-                g2.setColor(border());
-                g2.drawRoundRect(0, 0, getWidth()-1, getHeight()-1, 4, 4);
-                g2.setFont(FONT_UI_SM);
-                g2.setColor(new Color(0x858585));
-                FontMetrics fm = g2.getFontMetrics();
-                g2.drawString(getText(),
-                    (getWidth()  - fm.stringWidth(getText())) / 2,
-                    (getHeight() + fm.getAscent() - fm.getDescent()) / 2 - 1);
-            }
-        };
-        btn.setPreferredSize(new Dimension(86, 22));
-        btn.setOpaque(false); btn.setContentAreaFilled(false);
-        btn.setBorderPainted(false); btn.setFocusPainted(false);
-        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        return btn;
     }
 
     // ── Generated Code ────────────────────────────────────────────────────────
@@ -885,8 +893,6 @@ public class MainGUI2 extends JFrame {
         };
         generatedCodeTable = new JTable(generatedCodeModel);
         styleTable(generatedCodeTable);
-        
-        // Adjust column width for Instruction opcode
         generatedCodeTable.getColumnModel().getColumn(0).setPreferredWidth(120);
         generatedCodeTable.getColumnModel().getColumn(0).setMaxWidth(250);
 
@@ -921,13 +927,227 @@ public class MainGUI2 extends JFrame {
     }
 
     // =========================================================================
-    //  CONSOLE  (VSCode-style terminal panel)
+    //  NEW: AST Tree Panel
+    // =========================================================================
+    private JPanel buildAstTreePanel() {
+        JPanel p = new JPanel(new BorderLayout(0, 0));
+        p.setBackground(bg());
+        p.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
+
+        // Toolbar
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        toolbar.setOpaque(false);
+
+        JLabel toolbarTitle = new JLabel("Abstract Syntax Tree");
+        toolbarTitle.setFont(FONT_UI_B);
+        toolbarTitle.setForeground(new Color(0x858585));
+        toolbar.add(toolbarTitle);
+
+        JButton expandBtn = buildSmallActionBtn("Expand All");
+        JButton collapseBtn = buildSmallActionBtn("Collapse All");
+        toolbar.add(Box.createHorizontalStrut(8));
+        toolbar.add(expandBtn);
+        toolbar.add(collapseBtn);
+
+        // Build JTree with empty root
+        DefaultMutableTreeNode root = new DefaultMutableTreeNode("Run compiler to generate AST");
+        astTreeModel = new DefaultTreeModel(root);
+        astTree = new JTree(astTreeModel);
+        astTree.setFont(FONT_MONO_SM);
+        astTree.setBackground(bg());
+        astTree.setForeground(isDarkMode ? new Color(0xD4D4D4) : new Color(0x1F2328));
+        astTree.setSelectionRow(0);
+        astTree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
+        astTree.setShowsRootHandles(true);
+        astTree.setRootVisible(true);
+        astTree.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+        // Style the tree renderer
+        DefaultTreeCellRenderer renderer = new DefaultTreeCellRenderer() {
+            @Override public Component getTreeCellRendererComponent(JTree tree, Object value,
+                    boolean sel, boolean expanded, boolean leaf, int row, boolean hasFocus) {
+                super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
+                setFont(FONT_MONO_SM);
+                setBackground(sel
+                    ? new Color(0x094771)
+                    : bg());
+                setForeground(sel
+                    ? Color.WHITE
+                    : isDarkMode ? new Color(0xD4D4D4) : new Color(0x1F2328));
+                setBackgroundNonSelectionColor(bg());
+                setBackgroundSelectionColor(new Color(0x094771));
+                setBorderSelectionColor(new Color(0x094771));
+
+                // Color-code node types based on content
+                String text = value.toString();
+                if (!sel) {
+                    if (text.startsWith("Program") || text.startsWith("Method") || text.startsWith("Function")) {
+                        setForeground(new Color(0x4EC994));      // green — declarations
+                    } else if (text.startsWith("If") || text.startsWith("While") || text.startsWith("For") || text.startsWith("Return")) {
+                        setForeground(new Color(0xC586C0));      // purple — control flow
+                    } else if (text.startsWith("Assign") || text.startsWith("VarDecl")) {
+                        setForeground(new Color(0x75BEFF));      // blue — declarations/assignments
+                    } else if (text.startsWith("BinaryOp") || text.startsWith("UnaryOp")) {
+                        setForeground(new Color(0xCCA700));      // yellow — operators
+                    } else if (text.startsWith("Literal") || text.startsWith("Number") || text.startsWith("String")) {
+                        setForeground(new Color(0xCE9178));      // orange — literals
+                    } else if (text.startsWith("Identifier") || text.startsWith("Var")) {
+                        setForeground(new Color(0x9CDCFE));      // light blue — identifiers
+                    }
+                }
+
+                // Icon substitutes using text prefix
+                if (!leaf) {
+                    setText("\uD83D\uDCC2 " + text);  // 📂 for non-leaf
+                } else {
+                    setText("\uD83D\uDCCC " + text);  // 📌 for leaf
+                }
+                return this;
+            }
+        };
+        renderer.setLeafIcon(null);
+        renderer.setOpenIcon(null);
+        renderer.setClosedIcon(null);
+        astTree.setCellRenderer(renderer);
+
+        // Expand/Collapse button actions
+        expandBtn.addActionListener(e -> {
+            for (int i = 0; i < astTree.getRowCount(); i++) astTree.expandRow(i);
+        });
+        collapseBtn.addActionListener(e -> {
+            for (int i = astTree.getRowCount() - 1; i > 0; i--) astTree.collapseRow(i);
+        });
+
+        JScrollPane scroll = new JScrollPane(astTree);
+        scroll.setBorder(BorderFactory.createLineBorder(border()));
+        scroll.getViewport().setBackground(bg());
+        styleScrollBar(scroll.getVerticalScrollBar());
+        styleScrollBar(scroll.getHorizontalScrollBar());
+
+        p.add(toolbar, BorderLayout.NORTH);
+        p.add(scroll,  BorderLayout.CENTER);
+        return p;
+    }
+
+    /**
+     * Builds an AST tree from the token list using a lightweight recursive-descent approach.
+     * This provides a meaningful structural view without requiring a full parser pass.
+     * If the compiler pipeline exposes an AST directly, swap this logic to use it.
+     */
+    private DefaultMutableTreeNode buildAstFromTokens(List<compiler.lexer.models.Tokens> tokens) {
+        DefaultMutableTreeNode root = new DefaultMutableTreeNode("Program");
+
+        // Simple structural grouper: walk tokens and build a hierarchical approximation
+        DefaultMutableTreeNode currentBlock = root;
+        DefaultMutableTreeNode currentStmt  = null;
+        int depth = 0;
+
+        java.util.Deque<DefaultMutableTreeNode> blockStack = new java.util.ArrayDeque<>();
+        blockStack.push(root);
+
+        for (int i = 0; i < tokens.size(); i++) {
+            compiler.lexer.models.Tokens t = tokens.get(i);
+            String lexeme = t.getLexeme();
+            String type   = t.getClass().getSimpleName();
+
+            switch (lexeme) {
+                case "{" -> {
+                    // Push a new block scope onto the stack
+                    DefaultMutableTreeNode block = new DefaultMutableTreeNode("Block");
+                    blockStack.peek().add(block);
+                    blockStack.push(block);
+                }
+                case "}" -> {
+                    if (blockStack.size() > 1) blockStack.pop();
+                }
+                case "if" -> {
+                    DefaultMutableTreeNode node = new DefaultMutableTreeNode("IfStatement");
+                    blockStack.peek().add(node);
+                    blockStack.push(node);
+                }
+                case "while" -> {
+                    DefaultMutableTreeNode node = new DefaultMutableTreeNode("WhileStatement");
+                    blockStack.peek().add(node);
+                    blockStack.push(node);
+                }
+                case "for" -> {
+                    DefaultMutableTreeNode node = new DefaultMutableTreeNode("ForStatement");
+                    blockStack.peek().add(node);
+                    blockStack.push(node);
+                }
+                case "return" -> {
+                    DefaultMutableTreeNode node = new DefaultMutableTreeNode("ReturnStatement");
+                    blockStack.peek().add(node);
+                    blockStack.push(node);
+                }
+                case ";" -> {
+                    // End of statement — pop back to block level if we pushed a statement node
+                    if (blockStack.size() > 1) {
+                        String topName = blockStack.peek().toString();
+                        if (!topName.equals("Block") && !topName.equals("Program")) {
+                            blockStack.pop();
+                        }
+                    }
+                }
+                default -> {
+                    // Check for variable declaration pattern: type identifier
+                    if (isTypeKeyword(lexeme) && i + 1 < tokens.size()) {
+                        String nextLexeme = tokens.get(i + 1).getLexeme();
+                        if (!nextLexeme.equals("(")) {
+                            // Variable declaration
+                            DefaultMutableTreeNode decl = new DefaultMutableTreeNode("VarDecl [" + lexeme + "]");
+                            DefaultMutableTreeNode nameNode = new DefaultMutableTreeNode("Identifier: " + nextLexeme);
+                            decl.add(nameNode);
+                            blockStack.peek().add(decl);
+                            // Check for assignment
+                            if (i + 2 < tokens.size() && tokens.get(i + 2).getLexeme().equals("=")) {
+                                decl.setUserObject("VarDecl [" + lexeme + "] = " + (i + 3 < tokens.size() ? tokens.get(i+3).getLexeme() : "?"));
+                            }
+                            i++; // skip identifier, we've consumed it
+                        } else {
+                            // Method declaration
+                            DefaultMutableTreeNode method = new DefaultMutableTreeNode("MethodDecl: " + nextLexeme);
+                            blockStack.peek().add(method);
+                            blockStack.push(method);
+                            i++;
+                        }
+                    } else if (type.equalsIgnoreCase("identifier") && i + 1 < tokens.size()
+                               && tokens.get(i + 1).getLexeme().equals("=")) {
+                        // Assignment statement
+                        String rhs = i + 2 < tokens.size() ? tokens.get(i + 2).getLexeme() : "?";
+                        DefaultMutableTreeNode assign = new DefaultMutableTreeNode("Assign: " + lexeme + " = " + rhs);
+                        blockStack.peek().add(assign);
+                        blockStack.push(assign);
+                    } else if (type.equalsIgnoreCase("operator")
+                               && (lexeme.equals("+") || lexeme.equals("-") || lexeme.equals("*") || lexeme.equals("/"))) {
+                        DefaultMutableTreeNode op = new DefaultMutableTreeNode("BinaryOp: " + lexeme);
+                        blockStack.peek().add(op);
+                    } else if (type.equalsIgnoreCase("constant") || type.equalsIgnoreCase("literal")) {
+                        DefaultMutableTreeNode lit = new DefaultMutableTreeNode(
+                            "Literal [" + type + "]: " + lexeme);
+                        blockStack.peek().add(lit);
+                    }
+                }
+            }
+        }
+        return root;
+    }
+
+    private boolean isTypeKeyword(String lexeme) {
+        return switch (lexeme) {
+            case "int", "float", "double", "boolean", "char", "String",
+                 "void", "long", "short", "byte" -> true;
+            default -> false;
+        };
+    }
+
+    // =========================================================================
+    //  CONSOLE
     // =========================================================================
     private JPanel buildConsole() {
         JPanel p = new JPanel(new BorderLayout(0, 0));
         p.setBackground(consoleBg());
 
-        // Console tab strip
         JPanel strip = new JPanel(new BorderLayout()) {
             @Override protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
@@ -937,34 +1157,32 @@ public class MainGUI2 extends JFrame {
                 g.drawLine(0, getHeight()-1, getWidth(), getHeight()-1);
             }
         };
-        strip.setPreferredSize(new Dimension(0, 35)); // Consistent header heights
+        strip.setPreferredSize(new Dimension(0, 35));
         strip.setOpaque(false);
 
         JPanel tabsLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         tabsLeft.setOpaque(false);
-        
-        consoleTabBtn = buildConsoleTabLbl(">_  Console", "Console");
+
+        consoleTabBtn   = buildConsoleTabLbl(">_  Console",      "Console");
         errorCountLabel = buildConsoleTabLbl("\u26A0  Errors (0)", "Errors");
         warnCountLabel  = buildConsoleTabLbl("\u24D8  Warnings (0)", "Warnings");
-        
-        // Tab Switching Logic
-        consoleTabBtn.addMouseListener(new MouseAdapter() { 
-            @Override public void mouseClicked(MouseEvent e) { switchConsoleCard("Console"); } 
+
+        consoleTabBtn.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) { switchConsoleCard("Console"); }
         });
-        errorCountLabel.addMouseListener(new MouseAdapter() { 
-            @Override public void mouseClicked(MouseEvent e) { switchConsoleCard("Errors"); } 
+        errorCountLabel.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) { switchConsoleCard("Errors"); }
         });
-        warnCountLabel.addMouseListener(new MouseAdapter() { 
-            @Override public void mouseClicked(MouseEvent e) { switchConsoleCard("Warnings"); } 
+        warnCountLabel.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) { switchConsoleCard("Warnings"); }
         });
 
         tabsLeft.add(consoleTabBtn); tabsLeft.add(errorCountLabel); tabsLeft.add(warnCountLabel);
 
-        // Right side actions
         JPanel cRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 6));
         cRight.setOpaque(false);
 
-        JLabel clearLbl = new JLabel("\uD83D\uDDD1 Clear");  // 🗑 Clear
+        JLabel clearLbl = new JLabel("\uD83D\uDDD1 Clear");
         clearLbl.setFont(FONT_UI_SM);
         clearLbl.setForeground(new Color(0x858585));
         clearLbl.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -997,42 +1215,37 @@ public class MainGUI2 extends JFrame {
         consoleArea.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
 
         String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-        appendConsole("\u2713 [" + now + "] Lexical analysis completed successfully", SUCCESS_GREEN);
-        appendConsole("\u2713 [" + now + "] Generated 42 tokens from source code",    SUCCESS_GREEN);
+        appendConsole("\u2713 [" + now + "] Compiler Visualization System ready.", SUCCESS_GREEN);
 
-        // Setup CardLayout for bottom panel
         consoleLayout = new CardLayout();
         consoleCardPanel = new JPanel(consoleLayout);
         consoleCardPanel.setOpaque(false);
 
         consoleCardPanel.add(createScrollableConsole(consoleArea), "Console");
-        consoleCardPanel.add(createScrollableList(errorList, "Error"), "Errors");
+        consoleCardPanel.add(createScrollableList(errorList,   "Error"),   "Errors");
         consoleCardPanel.add(createScrollableList(warningList, "Warning"), "Warnings");
-        
-        // Interaction for Error/Warning list items
+
         errorList.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 1) {
-                    String selected = errorList.getSelectedValue();
-                    if (selected != null) highlightLineFromError(selected);
-                }
-            }
-        });
-        
-        warningList.addMouseListener(new MouseAdapter() {
-            @Override public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 1) {
-                    String selected = warningList.getSelectedValue();
-                    if (selected != null) showWarningInConsole(selected);
-                }
+                String selected = errorList.getSelectedValue();
+                if (selected != null) highlightLineFromError(selected);
             }
         });
 
-        p.add(strip,  BorderLayout.NORTH);
+        warningList.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                String selected = warningList.getSelectedValue();
+                if (selected != null) showWarningInConsole(selected);
+            }
+        });
+
+        p.add(strip,            BorderLayout.NORTH);
         p.add(consoleCardPanel, BorderLayout.CENTER);
         return p;
     }
 
+    // FIX #10: Remove the redundant setForeground() call at construction time;
+    // rely entirely on paintComponent() which checks activeConsoleTab dynamically.
     private JLabel buildConsoleTabLbl(String text, String cardName) {
         JLabel lbl = new JLabel(text) {
             @Override protected void paintComponent(Graphics g) {
@@ -1042,15 +1255,15 @@ public class MainGUI2 extends JFrame {
                 if (isActive) {
                     g2.setColor(consoleBg());
                     g2.fillRect(0, 0, getWidth(), getHeight());
-                    // VSCode-style top blue indicator
                     g2.setColor(VSCODE_BLUE);
                     g2.fillRect(0, 0, getWidth(), 2);
                 }
+                // Always derive color from live state, not construction-time snapshot
+                setForeground(isActive ? new Color(0xCCCCCC) : new Color(0x858585));
                 super.paintComponent(g);
             }
         };
         lbl.setFont(FONT_UI_SM);
-        lbl.setForeground(cardName.equals(activeConsoleTab) ? new Color(0xCCCCCC) : new Color(0x858585));
         lbl.setBorder(BorderFactory.createEmptyBorder(6, 14, 6, 14));
         lbl.setOpaque(false);
         lbl.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -1072,7 +1285,7 @@ public class MainGUI2 extends JFrame {
         list.setSelectionBackground(isDarkMode ? new Color(0x37373D) : new Color(0xE8E8E8));
         list.setSelectionForeground(type.equals("Error") ? ERROR_RED : WARNING_YELLOW);
         list.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
-        
+
         JScrollPane sp = new JScrollPane(list);
         sp.setBorder(null);
         sp.getViewport().setBackground(consoleBg());
@@ -1084,8 +1297,6 @@ public class MainGUI2 extends JFrame {
         activeConsoleTab = cardName;
         consoleLayout.show(consoleCardPanel, cardName);
         updateConsoleCounts();
-
-        // Force redraw for active indicator (blue line)
         consoleTabBtn.repaint();
         errorCountLabel.repaint();
         warnCountLabel.repaint();
@@ -1097,13 +1308,12 @@ public class MainGUI2 extends JFrame {
 
     private void highlightLineFromError(String errorMsg) {
         try {
-            // Pattern to find "[Line X, Col Y]"
-            java.util.regex.Pattern p = java.util.regex.Pattern.compile("Line (\\d+)");
-            java.util.regex.Matcher m = p.matcher(errorMsg);
+            java.util.regex.Pattern pat = java.util.regex.Pattern.compile("Line (\\d+)");
+            java.util.regex.Matcher m   = pat.matcher(errorMsg);
             if (m.find()) {
-                int line = Integer.parseInt(m.group(1));
+                int line  = Integer.parseInt(m.group(1));
                 int start = codeEditor.getLineStartOffset(line - 1);
-                int end = codeEditor.getLineEndOffset(line - 1);
+                int end   = codeEditor.getLineEndOffset(line - 1);
                 codeEditor.setCaretPosition(start);
                 codeEditor.setSelectionStart(start);
                 codeEditor.setSelectionEnd(end);
@@ -1123,26 +1333,28 @@ public class MainGUI2 extends JFrame {
     private void updateConsoleCounts() {
         if (errorCountLabel != null) {
             errorCountLabel.setText("\u26A0  Errors (" + errorCount + ")");
-            errorCountLabel.setForeground(activeConsoleTab.equals("Errors") ? new Color(0xCCCCCC) : new Color(0x858585));
         }
         if (warnCountLabel != null) {
             warnCountLabel.setText("\u24D8  Warnings (" + warnCount + ")");
-            warnCountLabel.setForeground(activeConsoleTab.equals("Warnings") ? new Color(0xCCCCCC) : new Color(0x858585));
         }
-        if (consoleTabBtn != null) {
-            consoleTabBtn.setForeground(activeConsoleTab.equals("Console") ? new Color(0xCCCCCC) : new Color(0x858585));
-        }
+        // Repaint relies on paintComponent() for live color — no setForeground() needed here
+        if (consoleTabBtn   != null) consoleTabBtn.repaint();
+        if (errorCountLabel != null) errorCountLabel.repaint();
+        if (warnCountLabel  != null) warnCountLabel.repaint();
     }
 
+    // =========================================================================
+    //  ACTIONS
+    // =========================================================================
     private void handleNewFile() {
         codeEditor.setText("void main() {\n\n}");
-        if (symbolModel != null) symbolModel.setRowCount(0);
+        if (symbolModel        != null) symbolModel.setRowCount(0);
         if (generatedCodeModel != null) generatedCodeModel.setRowCount(0);
+        if (runtimeArea        != null) runtimeArea.setText("// Program output will appear here after execution\n");
         errorListModel.clear();
         warningListModel.clear();
-        if (runtimeArea != null) runtimeArea.setText("// Program output will appear here after execution\n");
-        errorCount = 0;
-        warnCount = 0;
+        errorCount = 0; warnCount = 0;
+        resetAstTree("New file — run compiler to generate AST.");
         updateConsoleCounts();
         logAction("New project template created.", INFO_BLUE);
     }
@@ -1164,9 +1376,9 @@ public class MainGUI2 extends JFrame {
     private void handleCopyAction() {
         String code = codeEditor.getText();
         if (code.isEmpty()) return;
-        StringSelection selection = new StringSelection(code);
-        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-        clipboard.setContents(selection, selection);
+        StringSelection sel = new StringSelection(code);
+        Clipboard cb = Toolkit.getDefaultToolkit().getSystemClipboard();
+        cb.setContents(sel, sel);
         logAction("Editor content copied to clipboard.", INFO_BLUE);
     }
 
@@ -1186,15 +1398,15 @@ public class MainGUI2 extends JFrame {
 
     private void handleClearAction() {
         codeEditor.setText("");
-        if (symbolModel != null) symbolModel.setRowCount(0);
+        if (symbolModel        != null) symbolModel.setRowCount(0);
         if (generatedCodeModel != null) generatedCodeModel.setRowCount(0);
-        if (runtimeArea != null) runtimeArea.setText("");
+        if (runtimeArea        != null) runtimeArea.setText("");
         errorListModel.clear();
         warningListModel.clear();
-        errorCount = 0;
-        warnCount = 0;
+        errorCount = 0; warnCount = 0;
         SymbolTable.getInstance().reset();
         ErrorHandler.clear();
+        resetAstTree("Editor cleared — run compiler to generate AST.");
         updateConsoleCounts();
         logAction("Editor and counters cleared.", INFO_BLUE);
     }
@@ -1204,94 +1416,117 @@ public class MainGUI2 extends JFrame {
         appendConsole("[" + now + "] " + msg, color);
     }
 
+    private void resetAstTree(String message) {
+        if (astTreeModel != null && astTree != null) {
+            DefaultMutableTreeNode placeholder = new DefaultMutableTreeNode(message);
+            astTreeModel.setRoot(placeholder);
+            astTree.repaint();
+        }
+    }
+
     /**
-     * Integrates the compilation and execution pipeline.
-     * Captures System.out/System.err during interpretation to populate the Runtime Output tab.
+     * FIX #9: All UI mutation is done on the EDT via SwingUtilities.invokeLater().
+     * The background thread only computes — it never touches Swing components directly.
+     *
+     * FIX #3: System.out/err are always restored in the finally block,
+     * and the PrintStream is closed via try-with-resources.
      */
     private void handleRunAction() {
         String code = codeEditor.getText();
         if (code.trim().isEmpty()) return;
 
-        // 1. Reset Internal State and UI for new run
-        if (runtimeArea != null) runtimeArea.setText("");
-        if (consoleArea != null) consoleArea.setText("");
+        // Reset UI state on EDT before starting background thread
+        if (runtimeArea        != null) runtimeArea.setText("");
+        if (consoleArea        != null) consoleArea.setText("");
         if (generatedCodeModel != null) generatedCodeModel.setRowCount(0);
-        if (symbolModel != null) symbolModel.setRowCount(0);
+        if (symbolModel        != null) symbolModel.setRowCount(0);
         errorListModel.clear();
         warningListModel.clear();
-        
-        errorCount = 0;
-        warnCount = 0;
+        errorCount = 0; warnCount = 0;
         SymbolTable.getInstance().reset();
         ErrorHandler.clear();
+        resetAstTree("Compiling...");
         updateConsoleCounts();
-        
+
         String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
         appendConsole("\u2699 [" + now + "] Compilation started...", INFO_BLUE);
 
+        // FIX #9: Only computation happens off-EDT; all Swing updates go through invokeLater
         new Thread(() -> {
             try {
                 long startTime = System.nanoTime();
+
+                // FIX #9: pipeline.compile() must not touch Swing state internally.
+                // If it does, that needs to be fixed in CompilerPipeline itself.
                 CompilerPipeline pipeline = new CompilerPipeline();
                 CompilerPipeline.CompileResult compileResult = pipeline.compile(code);
-                long endTime = System.nanoTime();
-                
-                long durationMs = (endTime - startTime) / 1_000_000;
-                String timeStr = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+
+                long durationMs = (System.nanoTime() - startTime) / 1_000_000;
+                String timeStr  = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
 
                 if (compileResult.errors.isEmpty()) {
-                    SwingUtilities.invokeLater(() -> 
-                        appendConsole("\u2713 [" + timeStr + "] Compilation successful (" + durationMs + "ms)", SUCCESS_GREEN));
+                    // FIX #3: Capture stdout/stderr safely; always restore in finally
+                    ByteArrayOutputStream buffer      = new ByteArrayOutputStream();
+                    PrintStream           originalOut = System.out;
+                    PrintStream           originalErr = System.err;
 
-                    // Capture runtime output
-                    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-                    PrintStream originalOut = System.out;
-                    PrintStream originalErr = System.err;
-                    
+                    String runtimeOutput;
                     try (PrintStream capture = new PrintStream(buffer, true)) {
                         System.setOut(capture);
                         System.setErr(capture);
-                        
                         Interpreter interpreter = new Interpreter();
                         interpreter.execute(compileResult.instructions);
-                        
-                        SwingUtilities.invokeLater(() -> {
-                            for (compiler.lexer.models.Tokens t : compileResult.tokens) {
-                                symbolModel.addRow(new Object[]{
-                                    t.getClass().getSimpleName().toLowerCase(),
-                                    t.getLexeme(),
-                                    getAttributeValue(t)
-                                });
-                            }
-                            outputTabs.setSelectedIndex(0); // Focus Runtime Output tab
-                        });
-
-                        final String runtimeOutput = buffer.toString();
-                        SwingUtilities.invokeLater(() -> {
-                            runtimeArea.setText(runtimeOutput.isEmpty() ? "<no runtime output>" : runtimeOutput);
-                            appendConsole("\u2713 [" + timeStr + "] Execution completed.", SUCCESS_GREEN);
-                            
-                            // Populate the Generated Code tab with the TAC instructions
-                            generatedCodeModel.setRowCount(0);
-                            for (Instruction ins : compileResult.instructions) {
-                                generatedCodeModel.addRow(new Object[]{
-                                    ins.getOpcode().name(),
-                                    ins.toString()
-                                });
-                            }
-                        });
                     } finally {
                         System.setOut(originalOut);
                         System.setErr(originalErr);
                     }
+                    runtimeOutput = buffer.toString();
+
+                    // Build AST from tokens (off-EDT is safe; DefaultMutableTreeNode is not Swing)
+                    final DefaultMutableTreeNode astRoot =
+                        buildAstFromTokens(compileResult.tokens);
+
+                    final String finalOutput = runtimeOutput;
+                    final long   finalMs     = durationMs;
+
+                    SwingUtilities.invokeLater(() -> {
+                        appendConsole("\u2713 [" + timeStr + "] Compilation successful (" + finalMs + "ms)", SUCCESS_GREEN);
+
+                        // Populate Symbol Table — FIX #4: col 0 = Category, col 1 = Lexeme, col 2 = Attribute
+                        for (compiler.lexer.models.Tokens t : compileResult.tokens) {
+                            String category = t.getClass().getSimpleName().toLowerCase();
+                            symbolModel.addRow(new Object[]{
+                                category,
+                                t.getLexeme(),
+                                getAttributeValue(t)
+                            });
+                        }
+
+                        // Populate Generated Code tab
+                        generatedCodeModel.setRowCount(0);
+                        for (Instruction ins : compileResult.instructions) {
+                            generatedCodeModel.addRow(new Object[]{
+                                ins.getOpcode().name(),
+                                ins.toString()
+                            });
+                        }
+
+                        // Populate AST Tree tab
+                        astTreeModel.setRoot(astRoot);
+                        for (int i = 0; i < astTree.getRowCount(); i++) astTree.expandRow(i);
+
+                        // Populate Runtime Output tab
+                        runtimeArea.setText(finalOutput.isEmpty() ? "<no runtime output>" : finalOutput);
+
+                        appendConsole("\u2713 [" + timeStr + "] Execution completed.", SUCCESS_GREEN);
+                        outputTabs.setSelectedIndex(0); // Focus Runtime Output
+                    });
+
                 } else {
                     SwingUtilities.invokeLater(() -> {
-                        errorCount = compileResult.errors.size();
-                        updateConsoleCounts();
-                        
+                        errorCount = 0; warnCount = 0;
                         String logTime = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-                        appendConsole("\u2716 [" + logTime + "] Compilation failed with " + errorCount + " errors.", ERROR_RED);
-                        
+
                         for (String err : compileResult.errors) {
                             String timestamped = "[" + logTime + "] " + err;
                             if (err.toLowerCase().contains("warning")) {
@@ -1299,21 +1534,29 @@ public class MainGUI2 extends JFrame {
                                 warnCount++;
                             } else {
                                 errorListModel.addElement(timestamped);
+                                errorCount++;
                             }
                         }
+
+                        appendConsole("\u2716 [" + logTime + "] Compilation failed with "
+                            + errorCount + " error(s), " + warnCount + " warning(s).", ERROR_RED);
                         updateConsoleCounts();
                         if (errorCount > 0) switchConsoleCard("Errors");
+                        else if (warnCount > 0) switchConsoleCard("Warnings");
+
                         runtimeArea.setText("<runtime skipped due to compile errors>");
+                        resetAstTree("Compilation failed — fix errors and re-run.");
                     });
                 }
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> appendConsole("\u26A0 [Internal Error] " + ex.getMessage(), ERROR_RED));
+                SwingUtilities.invokeLater(() ->
+                    appendConsole("\u26A0 [Internal Error] " + ex.getMessage(), ERROR_RED));
             }
         }).start();
     }
 
     // =========================================================================
-    //  STATUS BAR  (VSCode-style blue bottom bar)
+    //  STATUS BAR
     // =========================================================================
     private JPanel buildStatusBar() {
         JPanel bar = new JPanel(new BorderLayout()) {
@@ -1330,10 +1573,8 @@ public class MainGUI2 extends JFrame {
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 3));
         left.setOpaque(false);
 
-        // Branch icon + name
-        JLabel branchLbl = new JLabel("\uD83D\uDD00 main");  // 🔀 main
+        JLabel branchLbl = new JLabel("\uD83D\uDD00 main");
         branchLbl.setFont(FONT_UI_SM); branchLbl.setForeground(Color.WHITE);
-        if (lnColLabel != null) lnColLabel.setForeground(new Color(0xCCCCCC));
 
         JLabel enc  = new JLabel("UTF-8");
         enc.setFont(FONT_UI_SM); enc.setForeground(new Color(0xCCCCCC));
@@ -1341,22 +1582,22 @@ public class MainGUI2 extends JFrame {
         JLabel lang = new JLabel("Java");
         lang.setFont(FONT_UI_SM); lang.setForeground(new Color(0xCCCCCC));
 
-        left.add(branchLbl); left.add(lnColLabel); left.add(enc); left.add(lang);
+        left.add(branchLbl); left.add(enc); left.add(lang);
 
         JPanel right2 = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 3));
         right2.setOpaque(false);
 
-        // Move Ln/Col to right side to align with Output area divider
-        if (lnColLabel != null) {
-            left.remove(lnColLabel);
-            right2.add(lnColLabel);
-        }
+        // FIX #6: lnColLabel is always fresh here; safely add to right panel
+        lnColLabel.setFont(FONT_UI_SM);
+        lnColLabel.setForeground(new Color(0xCCCCCC));
+        right2.add(lnColLabel);
 
         JLabel spaces = new JLabel("Spaces: 4");
         spaces.setFont(FONT_UI_SM); spaces.setForeground(new Color(0xCCCCCC));
 
         JLabel modeLabel = new JLabel(isDarkMode ? "\uD83C\uDF19 Dark" : "\u2600 Light");
         modeLabel.setFont(FONT_UI_SM); modeLabel.setForeground(new Color(0xCCCCCC));
+
         right2.add(spaces); right2.add(modeLabel);
 
         bar.add(left,   BorderLayout.WEST);
@@ -1402,23 +1643,35 @@ public class MainGUI2 extends JFrame {
         });
     }
 
+    // FIX #5: getAttributeValue now uses a case-insensitive approach and handles
+    // both exact class names (e.g. "Keyword") and all-caps (e.g. "KEYWORD").
     private String getAttributeValue(compiler.lexer.models.Tokens t) {
         String category = t.getClass().getSimpleName().toUpperCase();
         String lexeme   = t.getLexeme();
 
-        return switch (category) {
-            case "IDENTIFIER"   -> "Symbol Table Pointer: " + Integer.toHexString(System.identityHashCode(lexeme)).toUpperCase();
-            case "CONSTANT"     -> "Numeric Value: " + lexeme;
-            case "LITERAL"      -> lexeme.startsWith("'") ? "Char Literal" : "String Literal";
-            case "OPERATOR"     -> getOperatorType(lexeme);
-            default             -> "-";
-        };
+        // Normalize: strip common suffixes like "Token" so "KeywordToken" → "KEYWORD"
+        category = category.replace("TOKEN", "").trim();
+
+        if (category.contains("IDENTIFIER")) {
+            return "Symbol Table Ptr: 0x" + Integer.toHexString(System.identityHashCode(lexeme)).toUpperCase();
+        } else if (category.contains("CONSTANT")) {
+            return "Numeric Value: " + lexeme;
+        } else if (category.contains("LITERAL")) {
+            return lexeme.startsWith("'") ? "Char Literal" : "String Literal";
+        } else if (category.contains("OPERATOR")) {
+            return getOperatorType(lexeme);
+        } else if (category.contains("KEYWORD")) {
+            return "Reserved Word";
+        } else if (category.contains("PUNCTUATION")) {
+            return "Delimiter";
+        }
+        return "-";
     }
 
     private String getOperatorType(String op) {
-        if (op.matches("[+\\-*/%]")) return "Arithmetic Operator";
-        if (op.matches("==|!=|<|>|<=|>=")) return "Relational Operator";
-        if (op.matches("&&|\\|\\||!")) return "Logical Operator";
+        if (op.matches("[+\\-*/%]"))         return "Arithmetic Operator";
+        if (op.matches("==|!=|<|>|<=|>="))   return "Relational Operator";
+        if (op.matches("&&|\\|\\||!"))       return "Logical Operator";
         if (op.matches("=|\\+=|-=|\\*=|/=")) return "Assignment Operator";
         return "Special Operator";
     }
@@ -1441,8 +1694,37 @@ public class MainGUI2 extends JFrame {
         });
     }
 
+    private JButton buildSmallActionBtn(String text) {
+        JButton btn = new JButton(text) {
+            @Override protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                Color bgC = getModel().isRollover()
+                    ? (isDarkMode ? new Color(0x37373D) : new Color(0xE8E8E8))
+                    : bgPanel();
+                g2.setColor(bgC);
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 4, 4);
+                g2.setColor(border());
+                g2.drawRoundRect(0, 0, getWidth()-1, getHeight()-1, 4, 4);
+                g2.setFont(FONT_UI_SM);
+                g2.setColor(new Color(0x858585));
+                FontMetrics fm = g2.getFontMetrics();
+                g2.drawString(getText(),
+                    (getWidth()  - fm.stringWidth(getText())) / 2,
+                    (getHeight() + fm.getAscent() - fm.getDescent()) / 2 - 1);
+            }
+        };
+        btn.setPreferredSize(new Dimension(86, 22));
+        btn.setOpaque(false); btn.setContentAreaFilled(false);
+        btn.setBorderPainted(false); btn.setFocusPainted(false);
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        return btn;
+    }
+
     // =========================================================================
     //  LINE NUMBER COMPONENT
+    //  FIX #7: getPreferredSize() no longer calls getHeight() before layout.
+    //  We compute height from line count × line height instead.
     // =========================================================================
     static class LineNumberComponent extends JComponent {
         private final JTextArea textArea;
@@ -1452,22 +1734,26 @@ public class MainGUI2 extends JFrame {
         LineNumberComponent(JTextArea ta, Color bg, Color fg, Color border) {
             this.textArea = ta;
             this.lnBg = bg; this.lnFg = fg; this.lnBorder = border;
-            setFont(ta.getFont()); // Fix: Sync font with editor for vertical alignment
+            setFont(ta.getFont());
             setBackground(bg);
             setForeground(fg);
             setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, border));
             ta.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-                public void insertUpdate(javax.swing.event.DocumentEvent e)  { repaint(); }
-                public void removeUpdate(javax.swing.event.DocumentEvent e)  { repaint(); }
-                public void changedUpdate(javax.swing.event.DocumentEvent e) { repaint(); }
+                public void insertUpdate(javax.swing.event.DocumentEvent e)  { repaint(); revalidate(); }
+                public void removeUpdate(javax.swing.event.DocumentEvent e)  { repaint(); revalidate(); }
+                public void changedUpdate(javax.swing.event.DocumentEvent e) { repaint(); revalidate(); }
             });
         }
 
         @Override public Dimension getPreferredSize() {
-            int lines = textArea.getLineCount();
-            String max = String.valueOf(Math.max(lines, 999));
+            // FIX #7: Use line count × font height instead of getHeight() (which is 0 pre-layout)
+            int lines  = textArea.getLineCount();
+            int lineH  = textArea.getFontMetrics(textArea.getFont()).getHeight();
+            int height = Math.max(lines * lineH, 100);
+
+            String maxStr = String.valueOf(Math.max(lines, 999));
             FontMetrics fm = getFontMetrics(getFont());
-            return new Dimension(fm.stringWidth(max) + PAD * 2, textArea.getHeight());
+            return new Dimension(fm.stringWidth(maxStr) + PAD * 2, height);
         }
 
         @Override protected void paintComponent(Graphics g) {
@@ -1477,9 +1763,10 @@ public class MainGUI2 extends JFrame {
             g2.fillRect(0, 0, getWidth(), getHeight());
 
             g2.setFont(getFont());
-            FontMetrics fm = g2.getFontMetrics();
-            Rectangle clip = g.getClipBounds();
-            int lineH    = textArea.getFontMetrics(textArea.getFont()).getHeight();
+            FontMetrics fm   = g2.getFontMetrics();
+            Rectangle   clip = g.getClipBounds();
+            int lineH = textArea.getFontMetrics(textArea.getFont()).getHeight();
+
             int startLine = (clip == null) ? 0 : Math.max(0, clip.y / lineH);
             int endLine   = (clip == null)
                 ? textArea.getLineCount() - 1
