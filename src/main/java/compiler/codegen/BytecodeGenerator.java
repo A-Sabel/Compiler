@@ -98,6 +98,9 @@ public class BytecodeGenerator {
     private final ConstantPool  constantPool  = new ConstantPool();
     private final StackTracker  stackTracker  = new StackTracker();
     private final SlotAllocator slotAllocator = new SlotAllocator();
+    private final Map<String, Map<String, Integer>> classFieldSlots = new HashMap<>();
+    private final Map<String, Map<String, String>>  classFieldTypes = new HashMap<>();
+    private String currentClassName = null;
     private int    currentSourceLine        = 0;
     private String sourceFileName           = null;
     private boolean unreachable             = false;
@@ -421,10 +424,34 @@ public class BytecodeGenerator {
                 if (name == null) name = node.getValue();
                 if (sourceFileName != null) emit(Instruction.sourceFile(sourceFileName));
                 emit(Instruction.classDecl(name));
+                currentClassName = name;
                 if (hasStaticFields(node)) beginStaticInit(name);
                 boolean hasConstructor = hasExplicitConstructor(node);
-                visitChildOfType(node, "CLASS_BODY");
+                ASTNode body = getChildOfType(node, "CLASS_BODY");
+                if (body != null) {
+                    // First pass: handle field declarations so slots are allocated
+                    for (ASTNode child : body.getChildren()) {
+                        String t = child.getType();
+                        if (t.equals("VAR_DECL_GROUP") || t.equals("VAR_DECL")) visit(child);
+                    }
+
+                    // Snapshot field slots/types for later method codegen
+                    Map<String, Integer> slotsSnapshot = new HashMap<>(slotAllocator.allSlots());
+                    Map<String, String> typesSnapshot = new HashMap<>();
+                    for (String fn : slotsSnapshot.keySet()) {
+                        typesSnapshot.put(fn, slotAllocator.typeOf(fn));
+                    }
+                    classFieldSlots.put(name, slotsSnapshot);
+                    classFieldTypes.put(name, typesSnapshot);
+
+                    // Second pass: handle remaining class body members (methods, etc.)
+                    for (ASTNode child : body.getChildren()) {
+                        String t = child.getType();
+                        if (!t.equals("VAR_DECL_GROUP") && !t.equals("VAR_DECL")) visit(child);
+                    }
+                }
                 if (!hasConstructor) synthesizeDefaultConstructor(name);
+                currentClassName = null;
                 return null;
             }
 
@@ -510,6 +537,18 @@ public class BytecodeGenerator {
                     emit(Instruction.typedLoad(loadOpc, result, String.valueOf(slot)));
                     stackTracker.push(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
                     return result;
+                }
+                // Not a local. If we're inside a method, try class-field snapshot
+                if (methodVarTypes != null && currentClassName != null) {
+                    Map<String, Integer> slots = classFieldSlots.get(currentClassName);
+                    Map<String, String> types = classFieldTypes.get(currentClassName);
+                    if (slots != null && slots.containsKey(varName)) {
+                        // Prefer field load from the class-level container
+                        String result = newTemp();
+                        emit(Instruction.fieldLoad(result, currentClassName, varName));
+                        stackTracker.push(1);
+                        return result;
+                    }
                 }
                 return varName;
             }
@@ -609,11 +648,19 @@ public class BytecodeGenerator {
                     ? initValue : initValue.getChildren().get(0));
             src = emitWideningIfNeeded(src, srcJvmType, jvmType);
 
-            Opcode storeOpc = typedStoreOpcode(jvmType);
-            emit(Instruction.typedStore(storeOpc,
-                    String.valueOf(slotAllocator.slotOf(varName)), src));
-            // The store consumes the value that visit() pushed.
-            stackTracker.pop(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
+            if (methodVarTypes == null && currentClassName != null) {
+                // Class-level field with initializer: emit a field store into the
+                // class-level container (recorded by class name). Interpreter will
+                // initialize class maps before main executes.
+                emit(Instruction.fieldStore(currentClassName, varName, src));
+                stackTracker.pop(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
+            } else {
+                Opcode storeOpc = typedStoreOpcode(jvmType);
+                emit(Instruction.typedStore(storeOpc,
+                        String.valueOf(slotAllocator.slotOf(varName)), src));
+                // The store consumes the value that visit() pushed.
+                stackTracker.pop(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
+            }
         } else {
             emitFieldDefault(varName, jvmType);
         }

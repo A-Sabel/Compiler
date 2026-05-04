@@ -15,10 +15,16 @@ public class Interpreter {
     private final Map<Integer, MethodInfo> methodsByStartIndex = new HashMap<>();
     private final List<ExceptionEntry> exceptionTable = new ArrayList<>();
     private final Map<String, Integer> labelIndices = new HashMap<>();
+    private final Map<String, Map<String, Object>> classStatics = new HashMap<>();
 
     public Object execute(List<Instruction> instructions) {
         buildMetadata(instructions);
         ExecutionContext context = new ExecutionContext(null);
+        // Seed class-level maps into the root context so FIELD_STORE/FIELD_LOAD
+        // at top-level and from methods can resolve class fields by class name.
+        for (Map.Entry<String, Map<String, Object>> e : classStatics.entrySet()) {
+            context.variables.put(e.getKey(), e.getValue());
+        }
         executeRange(instructions, 0, instructions.size(), context);
 
         MethodInfo entrypoint = findEntrypoint("main");
@@ -124,6 +130,7 @@ public class Interpreter {
                             Map<String, Object> map = (Map<String, Object>) objectValue;
                             map.put(instr.getOp(), fieldValue);
                         }
+                        
                         break;
                     }
 
@@ -446,6 +453,10 @@ public class Interpreter {
 
         for (int i = 0; i < instructions.size(); i++) {
             Instruction instr = instructions.get(i);
+                if (instr.getOpcode() == Opcode.CLASS) {
+                    // record class name so we can create a field container at runtime
+                    classStatics.put(instr.getArg1(), new HashMap<>());
+                }
             if (instr.getOpcode() == Opcode.METHOD_START) {
                 String name = instr.getArg1();
                 String returnType = instr.getOp();
@@ -515,6 +526,7 @@ public class Interpreter {
         if ("this".equals(name)) return context.variables.get(slotKey("0"));
         if (context.variables.containsKey(slotKey(name))) return context.variables.get(slotKey(name));
         if (context.variables.containsKey(name)) return context.variables.get(name);
+        if (classStatics.containsKey(name)) return classStatics.get(name);
         if ("true".equals(name)) return true;
         if ("false".equals(name)) return false;
         if (name.startsWith("\"") && name.endsWith("\"")) return name.substring(1, name.length() - 1);

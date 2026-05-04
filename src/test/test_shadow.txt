@@ -1,0 +1,13 @@
+class ShadowTest {
+    int x = 100;
+
+    void update() {
+        int x = 50; // Shadows class-level x
+        print(x);   // Should print 50
+    }
+
+    void main() {
+        update();
+        print(x);   // Should print 100
+    }
+}

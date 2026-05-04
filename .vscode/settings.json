@@ -1,18 +1,6 @@
 {
     "java.configuration.updateBuildConfiguration": "automatic",
     "java.server.launchMode": "Standard",
-    "cSpell.words": [
-        "dtde",
-        "errorlevel",
-        "JAVAC",
-        "Popout",
-        "Segoe",
-        "setlocal",
-        "SPECIALCHAR",
-        "Tokenfactory",
-        "udccb",
-        "unwired"
-    ],
 
     // Using the light mode
     "indentRainbow.indicatorStyle": "light",
