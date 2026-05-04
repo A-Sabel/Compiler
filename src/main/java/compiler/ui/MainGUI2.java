@@ -127,7 +127,8 @@ public class MainGUI2 extends JFrame {
     private JComboBox<String> filterCombo;
     private TableRowSorter<DefaultTableModel> symbolSorter;
     private DefaultTableModel symbolModel;
-    private JTextArea         generatedCodeArea;
+    private JTable            generatedCodeTable;
+    private DefaultTableModel generatedCodeModel;
     private JTextArea         runtimeArea;
     private JButton           themeToggleBtn;
     private JPanel            rootPanel;
@@ -877,21 +878,20 @@ public class MainGUI2 extends JFrame {
         p.setBackground(bg());
         p.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
 
-        generatedCodeArea = new JTextArea();
-        generatedCodeArea.setFont(FONT_MONO_SM);
-        generatedCodeArea.setBackground(bgPanel());
-        generatedCodeArea.setForeground(new Color(0xD4D4D4));
-        generatedCodeArea.setEditable(false);
-        generatedCodeArea.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-        generatedCodeArea.setText(
-            "; Generated Intermediate Representation\n" +
-            "; ──────────────────────────────────────\n" +
-            "; Run compiler to generate IR code\n"
-        );
+        String[] cols = {"Instruction", "Operands"};
+        generatedCodeModel = new DefaultTableModel(cols, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        generatedCodeTable = new JTable(generatedCodeModel);
+        styleTable(generatedCodeTable);
+        
+        // Adjust column width for Instruction opcode
+        generatedCodeTable.getColumnModel().getColumn(0).setPreferredWidth(120);
+        generatedCodeTable.getColumnModel().getColumn(0).setMaxWidth(250);
 
-        JScrollPane scroll = new JScrollPane(generatedCodeArea);
+        JScrollPane scroll = new JScrollPane(generatedCodeTable);
         scroll.setBorder(BorderFactory.createLineBorder(border()));
-        scroll.getViewport().setBackground(bgPanel());
+        scroll.getViewport().setBackground(bg());
         styleScrollBar(scroll.getVerticalScrollBar());
         p.add(scroll, BorderLayout.CENTER);
         return p;
@@ -1133,13 +1133,7 @@ public class MainGUI2 extends JFrame {
     private void handleNewFile() {
         codeEditor.setText("void main() {\n\n}");
         if (symbolModel != null) symbolModel.setRowCount(0);
-        if (generatedCodeArea != null) {
-            generatedCodeArea.setText(
-                "; Generated Intermediate Representation\n" +
-                "; ──────────────────────────────────────\n" +
-                "; Run compiler to generate IR code\n"
-            );
-        }
+        if (generatedCodeModel != null) generatedCodeModel.setRowCount(0);
         errorListModel.clear();
         warningListModel.clear();
         if (runtimeArea != null) runtimeArea.setText("// Program output will appear here after execution\n");
@@ -1188,10 +1182,15 @@ public class MainGUI2 extends JFrame {
 
     private void handleClearAction() {
         codeEditor.setText("");
-        errorCount = 0;
-        warnCount = 0;
+        if (symbolModel != null) symbolModel.setRowCount(0);
+        if (generatedCodeModel != null) generatedCodeModel.setRowCount(0);
+        if (runtimeArea != null) runtimeArea.setText("");
         errorListModel.clear();
         warningListModel.clear();
+        errorCount = 0;
+        warnCount = 0;
+        SymbolTable.getInstance().reset();
+        ErrorHandler.clear();
         updateConsoleCounts();
         logAction("Editor and counters cleared.", INFO_BLUE);
     }
@@ -1209,17 +1208,18 @@ public class MainGUI2 extends JFrame {
         String code = codeEditor.getText();
         if (code.trim().isEmpty()) return;
 
-        // Reset UI state for new run
-        ErrorHandler.clear();
+        // 1. Reset Internal State and UI for new run
         if (runtimeArea != null) runtimeArea.setText("");
         if (consoleArea != null) consoleArea.setText("");
-        if (generatedCodeArea != null) generatedCodeArea.setText("");
+        if (generatedCodeModel != null) generatedCodeModel.setRowCount(0);
+        if (symbolModel != null) symbolModel.setRowCount(0);
         errorListModel.clear();
         warningListModel.clear();
-        outputTabs.setSelectedIndex(0); // Focus Runtime Output tab
-
+        
         errorCount = 0;
         warnCount = 0;
+        SymbolTable.getInstance().reset();
+        ErrorHandler.clear();
         updateConsoleCounts();
         
         String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
@@ -1227,16 +1227,17 @@ public class MainGUI2 extends JFrame {
 
         new Thread(() -> {
             try {
-                long startTime = System.currentTimeMillis();
+                long startTime = System.nanoTime();
                 CompilerPipeline pipeline = new CompilerPipeline();
                 CompilerPipeline.CompileResult compileResult = pipeline.compile(code);
-                long endTime = System.currentTimeMillis();
+                long endTime = System.nanoTime();
+                
+                long durationMs = (endTime - startTime) / 1_000_000;
                 String timeStr = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-                String duration = (endTime - startTime) + "ms";
 
                 if (compileResult.errors.isEmpty()) {
                     SwingUtilities.invokeLater(() -> 
-                        appendConsole("\u2713 [" + timeStr + "] Compilation successful (" + duration + ")", SUCCESS_GREEN));
+                        appendConsole("\u2713 [" + timeStr + "] Compilation successful (" + durationMs + "ms)", SUCCESS_GREEN));
 
                     // Capture runtime output
                     ByteArrayOutputStream buffer = new ByteArrayOutputStream();
@@ -1251,14 +1252,14 @@ public class MainGUI2 extends JFrame {
                         interpreter.execute(compileResult.instructions);
                         
                         SwingUtilities.invokeLater(() -> {
-                            symbolModel.setRowCount(0);
                             for (compiler.lexer.models.Tokens t : compileResult.tokens) {
                                 symbolModel.addRow(new Object[]{
-                                    t.getClass().getSimpleName().toUpperCase(),
+                                    t.getClass().getSimpleName().toLowerCase(),
                                     t.getLexeme(),
                                     getAttributeValue(t)
                                 });
                             }
+                            outputTabs.setSelectedIndex(0); // Focus Runtime Output tab
                         });
 
                         final String runtimeOutput = buffer.toString();
@@ -1267,12 +1268,13 @@ public class MainGUI2 extends JFrame {
                             appendConsole("\u2713 [" + timeStr + "] Execution completed.", SUCCESS_GREEN);
                             
                             // Populate the Generated Code tab with the TAC instructions
-                            StringBuilder irText = new StringBuilder("; Generated Intermediate Representation\n");
-                            irText.append("; ──────────────────────────────────────\n");
+                            generatedCodeModel.setRowCount(0);
                             for (Instruction ins : compileResult.instructions) {
-                                irText.append(ins.toString()).append("\n");
+                                generatedCodeModel.addRow(new Object[]{
+                                    ins.getOpcode().name(),
+                                    ins.toString()
+                                });
                             }
-                            generatedCodeArea.setText(irText.toString());
                         });
                     } finally {
                         System.setOut(originalOut);
