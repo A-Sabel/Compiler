@@ -15,10 +15,16 @@ public class Interpreter {
     private final Map<Integer, MethodInfo> methodsByStartIndex = new HashMap<>();
     private final List<ExceptionEntry> exceptionTable = new ArrayList<>();
     private final Map<String, Integer> labelIndices = new HashMap<>();
+    private final Map<String, Map<String, Object>> classStatics = new HashMap<>();
 
     public Object execute(List<Instruction> instructions) {
         buildMetadata(instructions);
         ExecutionContext context = new ExecutionContext(null);
+        // Seed class-level maps into the root context so FIELD_STORE/FIELD_LOAD
+        // at top-level and from methods can resolve class fields by class name.
+        for (Map.Entry<String, Map<String, Object>> e : classStatics.entrySet()) {
+            context.variables.put(e.getKey(), e.getValue());
+        }
         executeRange(instructions, 0, instructions.size(), context);
 
         MethodInfo entrypoint = findEntrypoint("main");
@@ -63,7 +69,8 @@ public class Interpreter {
                         break;
 
                     case ARG: {
-                        context.pendingArgs.add(resolveValue(instr.getArg1(), context));
+                        Object val = resolveValue(instr.getArg1(), context);
+                        context.pendingArgs.add(val);
                         break;
                     }
 
@@ -123,12 +130,25 @@ public class Interpreter {
                             Map<String, Object> map = (Map<String, Object>) objectValue;
                             map.put(instr.getOp(), fieldValue);
                         }
+                        
                         break;
                     }
 
                     case NEW: {
                         RuntimeObject object = new RuntimeObject(instr.getArg1());
                         context.temps.put(instr.getResult(), object);
+                        break;
+                    }
+
+                    case NEW_ARRAY: {
+                        String elementType = instr.getArg1();
+                        Object sizeObj = resolveValue(instr.getOp(), context);
+                        int size = toNumber(sizeObj).intValue();
+                        List<Object> array = new ArrayList<>();
+                        for (int i = 0; i < size; i++) {
+                            array.add(null); // Initialize with nulls
+                        }
+                        context.temps.put(instr.getResult(), array);
                         break;
                     }
 
@@ -165,6 +185,18 @@ public class Interpreter {
                         else if (opcode == Opcode.IMUL) result = left * right;
                         else if (opcode == Opcode.IDIV) result = left / right;
                         else result = left % right;
+                        context.temps.put(instr.getResult(), (int) result);
+                        break;
+                    }
+
+                    case POW: {
+                        Object a = resolveValue(instr.getArg1(), context);
+                        Object b = resolveValue(instr.getArg2(), context);
+                        Number an = toNumber(a);
+                        Number bn = toNumber(b);
+                        double base = an.doubleValue();
+                        double exponent = bn.doubleValue();
+                        double result = Math.pow(base, exponent);
                         context.temps.put(instr.getResult(), (int) result);
                         break;
                     }
@@ -325,6 +357,15 @@ public class Interpreter {
             return null;
         }
 
+        if ("pow".equals(name)) {
+            if (args.size() < 2) {
+                throw new RuntimeException("pow() requires 2 arguments");
+            }
+            Number base = toNumber(args.get(0));
+            Number exponent = toNumber(args.get(1));
+            return (int) Math.pow(base.doubleValue(), exponent.doubleValue());
+        }
+
         MethodInfo method = lookupMethod(name, descriptor);
         if (method == null) {
             if (isVirtual && receiver != null && "toString".equals(name)) {
@@ -412,6 +453,10 @@ public class Interpreter {
 
         for (int i = 0; i < instructions.size(); i++) {
             Instruction instr = instructions.get(i);
+                if (instr.getOpcode() == Opcode.CLASS) {
+                    // record class name so we can create a field container at runtime
+                    classStatics.put(instr.getArg1(), new HashMap<>());
+                }
             if (instr.getOpcode() == Opcode.METHOD_START) {
                 String name = instr.getArg1();
                 String returnType = instr.getOp();
@@ -481,6 +526,7 @@ public class Interpreter {
         if ("this".equals(name)) return context.variables.get(slotKey("0"));
         if (context.variables.containsKey(slotKey(name))) return context.variables.get(slotKey(name));
         if (context.variables.containsKey(name)) return context.variables.get(name);
+        if (classStatics.containsKey(name)) return classStatics.get(name);
         if ("true".equals(name)) return true;
         if ("false".equals(name)) return false;
         if (name.startsWith("\"") && name.endsWith("\"")) return name.substring(1, name.length() - 1);

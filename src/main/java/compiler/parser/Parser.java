@@ -36,7 +36,8 @@ import compiler.util.ErrorHandler;
  *   equality       → relational ( (== | !=) relational )*
  *   relational     → additive  ( (< | > | <= | >=) additive )*
  *   additive       → multiplicative ( (+ | -) multiplicative )*
- *   multiplicative → unary ( (* | / | %) unary )*
+ *   multiplicative → exponentiation ( (* | / | %) exponentiation )*
+ *   exponentiation → unary ( ** unary )*   [right-associative]
  *   unary          → (! | - | ++ | -- | ~) unary | (Type) unary | postfix
  *   postfix        → primary (++ | --)?
  *   primary        → NUMBER | STRING | IDENTIFIER | ( expr )
@@ -721,16 +722,31 @@ public class Parser {
     }
 
     private ASTNode parseMultiplicative() {
-        ASTNode left = parseUnary();
+        ASTNode left = parseExponentiation();
         while (currentType() != null && currentType().equals("OPERATOR")
                && (currentLexeme().equals("*") || currentLexeme().equals("/")
                    || currentLexeme().equals("%"))) {
             Tokens t = current();
             String op = currentLexeme(); advance();
-            ASTNode right = parseUnary();
+            ASTNode right = parseExponentiation();
             ASTNode node = ASTNode.of("BINARY_OP", op, t.getLine(), t.getColumn());
             node.addChild(left); node.addChild(right);
             left = node;
+        }
+        return left;
+    }
+
+    private ASTNode parseExponentiation() {
+        ASTNode left = parseUnary();
+        // Right-associative: 2**3**2 = 2**(3**2) = 2**9 = 512
+        if (currentType() != null && currentType().equals("OPERATOR")
+               && currentLexeme().equals("**")) {
+            Tokens t = current();
+            String op = currentLexeme(); advance();
+            ASTNode right = parseExponentiation(); // Right-associative recursion
+            ASTNode node = ASTNode.of("BINARY_OP", op, t.getLine(), t.getColumn());
+            node.addChild(left); node.addChild(right);
+            return node;
         }
         return left;
     }

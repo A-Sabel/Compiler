@@ -98,10 +98,14 @@ public class BytecodeGenerator {
     private final ConstantPool  constantPool  = new ConstantPool();
     private final StackTracker  stackTracker  = new StackTracker();
     private final SlotAllocator slotAllocator = new SlotAllocator();
+    private final Map<String, Map<String, Integer>> classFieldSlots = new HashMap<>();
+    private final Map<String, Map<String, String>>  classFieldTypes = new HashMap<>();
+    private String currentClassName = null;
     private int    currentSourceLine        = 0;
     private String sourceFileName           = null;
     private boolean unreachable             = false;
     private Map<String, String> methodVarTypes = null;
+    private final Map<String, String> cseResultMap = new HashMap<>();
 
     public void setSourceFileName(String name) { this.sourceFileName = name; }
     public void setCurrentSourceLine(int line)  { this.currentSourceLine = line; }
@@ -112,6 +116,7 @@ public class BytecodeGenerator {
         labelCount = 0;
         currentBreakLabel    = null;
         currentContinueLabel = null;
+        cseResultMap.clear();
         unreachable = false;
         visit(root);
         applyPeepholeOptimizations();
@@ -419,10 +424,34 @@ public class BytecodeGenerator {
                 if (name == null) name = node.getValue();
                 if (sourceFileName != null) emit(Instruction.sourceFile(sourceFileName));
                 emit(Instruction.classDecl(name));
+                currentClassName = name;
                 if (hasStaticFields(node)) beginStaticInit(name);
                 boolean hasConstructor = hasExplicitConstructor(node);
-                visitChildOfType(node, "CLASS_BODY");
+                ASTNode body = getChildOfType(node, "CLASS_BODY");
+                if (body != null) {
+                    // First pass: handle field declarations so slots are allocated
+                    for (ASTNode child : body.getChildren()) {
+                        String t = child.getType();
+                        if (t.equals("VAR_DECL_GROUP") || t.equals("VAR_DECL")) visit(child);
+                    }
+
+                    // Snapshot field slots/types for later method codegen
+                    Map<String, Integer> slotsSnapshot = new HashMap<>(slotAllocator.allSlots());
+                    Map<String, String> typesSnapshot = new HashMap<>();
+                    for (String fn : slotsSnapshot.keySet()) {
+                        typesSnapshot.put(fn, slotAllocator.typeOf(fn));
+                    }
+                    classFieldSlots.put(name, slotsSnapshot);
+                    classFieldTypes.put(name, typesSnapshot);
+
+                    // Second pass: handle remaining class body members (methods, etc.)
+                    for (ASTNode child : body.getChildren()) {
+                        String t = child.getType();
+                        if (!t.equals("VAR_DECL_GROUP") && !t.equals("VAR_DECL")) visit(child);
+                    }
+                }
                 if (!hasConstructor) synthesizeDefaultConstructor(name);
+                currentClassName = null;
                 return null;
             }
 
@@ -493,6 +522,7 @@ public class BytecodeGenerator {
             case "POSTFIX_OP":   return handlePostfixOp(node);
             case "CAST":         return handleCast(node);
             case "NEW":          return handleNew(node);
+            case "NEW_ARRAY":    return handleNewArray(node);
             case "ARRAY_ACCESS": return handleArrayAccess(node);
             case "METHOD_CALL":  return handleMethodCall(node);
             case "FIELD_ACCESS": return handleFieldAccess(node);
@@ -508,6 +538,18 @@ public class BytecodeGenerator {
                     stackTracker.push(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
                     return result;
                 }
+                // Not a local. If we're inside a method, try class-field snapshot
+                if (methodVarTypes != null && currentClassName != null) {
+                    Map<String, Integer> slots = classFieldSlots.get(currentClassName);
+                    Map<String, String> types = classFieldTypes.get(currentClassName);
+                    if (slots != null && slots.containsKey(varName)) {
+                        // Prefer field load from the class-level container
+                        String result = newTemp();
+                        emit(Instruction.fieldLoad(result, currentClassName, varName));
+                        stackTracker.push(1);
+                        return result;
+                    }
+                }
                 return varName;
             }
 
@@ -521,6 +563,17 @@ public class BytecodeGenerator {
 
             case "INIT_VALUE":
                 return visit(node.getChildren().get(0));
+
+            case "TEMP_REF":
+                // Reference to a cached subexpression (from CSE optimization)
+                // Look up the key in our CSE result map to get the temp variable
+                String key = node.getValue();
+                String cachedTemp = cseResultMap.get(key);
+                if (cachedTemp != null) {
+                    return cachedTemp;
+                }
+                // If not found, something went wrong - return a new temp for safety
+                return newTemp();
 
             case "ERROR":
                 throw new RuntimeException("Encountered ERROR node: " + node.getValue());
@@ -595,11 +648,19 @@ public class BytecodeGenerator {
                     ? initValue : initValue.getChildren().get(0));
             src = emitWideningIfNeeded(src, srcJvmType, jvmType);
 
-            Opcode storeOpc = typedStoreOpcode(jvmType);
-            emit(Instruction.typedStore(storeOpc,
-                    String.valueOf(slotAllocator.slotOf(varName)), src));
-            // The store consumes the value that visit() pushed.
-            stackTracker.pop(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
+            if (methodVarTypes == null && currentClassName != null) {
+                // Class-level field with initializer: emit a field store into the
+                // class-level container (recorded by class name). Interpreter will
+                // initialize class maps before main executes.
+                emit(Instruction.fieldStore(currentClassName, varName, src));
+                stackTracker.pop(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
+            } else {
+                Opcode storeOpc = typedStoreOpcode(jvmType);
+                emit(Instruction.typedStore(storeOpc,
+                        String.valueOf(slotAllocator.slotOf(varName)), src));
+                // The store consumes the value that visit() pushed.
+                stackTracker.pop(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
+            }
         } else {
             emitFieldDefault(varName, jvmType);
         }
@@ -956,12 +1017,33 @@ public class BytecodeGenerator {
         String right  = visit(rightNode);
         String result = newTemp();
         String folded = tryConstantFold(result, left, opStr, right);
-        if (folded != null) return folded;
+        if (folded != null) {
+            // If this has a CSE key, cache the result
+            String cseKey = node.getAttribute("cse_key");
+            if (cseKey != null && !cseKey.isEmpty()) {
+                cseResultMap.put(cseKey, result);
+            }
+            return folded;
+        }
         String reduced = tryStrengthReduce(result, left, opStr, right);
-        if (reduced != null) return reduced;
+        if (reduced != null) {
+            // If this has a CSE key, cache the result
+            String cseKey = node.getAttribute("cse_key");
+            if (cseKey != null && !cseKey.isEmpty()) {
+                cseResultMap.put(cseKey, result);
+            }
+            return reduced;
+        }
         Opcode opc = resolveTypedBinaryOpcode(opStr, "I");
         emit(Instruction.binary(opc, result, left, opStr, right));
         stackTracker.pop(2); stackTracker.push();
+        
+        // If this has a CSE key, cache the result for future TEMP_REF nodes
+        String cseKey = node.getAttribute("cse_key");
+        if (cseKey != null && !cseKey.isEmpty()) {
+            cseResultMap.put(cseKey, result);
+        }
+        
         return result;
     }
 
@@ -1067,6 +1149,21 @@ public class BytecodeGenerator {
         return result;
     }
 
+    private String handleNewArray(ASTNode node) {
+        String arrayType = node.getValue(); // e.g., "int[]"
+        String baseType = arrayType.endsWith("[]") ? arrayType.substring(0, arrayType.length() - 2) : arrayType;
+        
+        // Get the size expression (first child)
+        String size = visit(node.getChildren().get(0));
+        stackTracker.pop(1); // size was pushed by visit()
+        
+        String result = newTemp();
+        // Emit a special instruction for array creation
+        emit(Instruction.newArray(result, baseType, size));
+        stackTracker.push();
+        return result;
+    }
+
     private String handleArrayAccess(ASTNode node) {
         String base   = visit(node.getChildren().get(0)); // pushes 1
         String index  = visit(node.getChildren().get(1)); // pushes 1
@@ -1077,6 +1174,34 @@ public class BytecodeGenerator {
     }
 
     private String handleMethodCall(ASTNode node) {
+        String methodName = node.getValue();
+        
+        // Check if this is a built-in function
+        if ("print".equals(methodName) || "pow".equals(methodName)) {
+            ASTNode args = getChildOfType(node, "ARGS");
+            int argCount = 0;
+            if (args != null) {
+                for (ASTNode a : args.getChildren()) {
+                    String val = visit(a);
+                    emit(Instruction.arg(val));
+                    stackTracker.push();
+                    argCount++;
+                }
+            }
+            
+            String result = newTemp();
+            if ("print".equals(methodName)) {
+                emit(Instruction.print(argCount));
+                stackTracker.pop(argCount);
+            } else {
+                // pow function
+                emit(Instruction.call(result, methodName, argCount));
+                stackTracker.pop(argCount);
+                stackTracker.push();
+            }
+            return result;
+        }
+        
         ASTNode receiver   = getChildOfType(node, "RECEIVER");
         ASTNode args       = getChildOfType(node, "ARGS");
         ASTNode methodDecl = getChildOfType(node, "METHOD_DECL");
@@ -1117,11 +1242,11 @@ public class BytecodeGenerator {
         String result = newTemp();
         if (!isStatic) {
             // Instance method: always use virtual call (with explicit or implicit receiver)
-            emit(Instruction.callVirtualWithDescriptor(result, objAddr, node.getValue(), descriptor, argCount));
+            emit(Instruction.callVirtualWithDescriptor(result, objAddr, methodName, descriptor, argCount));
             stackTracker.pop(argCount + 1); // receiver + arguments
         } else {
             // Static method: use regular call
-            emit(Instruction.callWithDescriptor(result, node.getValue(), descriptor, argCount));
+            emit(Instruction.callWithDescriptor(result, methodName, descriptor, argCount));
             stackTracker.pop(argCount);
         }
         stackTracker.push(); // return value (even void methods push a placeholder temp)
@@ -1202,6 +1327,7 @@ public class BytecodeGenerator {
             case "*":  return Opcode.MUL;
             case "/":  return Opcode.DIV;
             case "%":  return Opcode.MOD;
+            case "**": return Opcode.POW;
             case "==": return Opcode.EQUAL;
             case "!=": return Opcode.NOT_EQUAL;
             case "<":  return Opcode.LESS_THAN;

@@ -112,8 +112,9 @@ public class Optimizer {
         result = strengthReduce(node);
         if (result != node) { fire("strength reduced"); return result; }
 
-        result = eliminateCommonSubexpression(node);
-        if (result != node) { fire("cse eliminated"); return result; }
+        // Disable CSE for now - it breaks when variables used in expressions are reassigned
+        // result = eliminateCommonSubexpression(node);
+        // if (result != node) { fire("cse eliminated"); return result; }
 
         return node;
     }

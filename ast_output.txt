@@ -1,0 +1,40 @@
+═══════════════════════════════════════════════════
+  Abstract Syntax Tree (AST) — Group 3 Compiler
+═══════════════════════════════════════════════════
+
+└── PROGRAM
+    └── CLASS_DECL(ShadowTest)
+        └── CLASS_BODY
+            ├── VAR_DECL_GROUP
+            │   └── VAR_DECL(int x)
+            │       ├── TYPE(int)
+            │       ├── NAME(x)
+            │       └── INIT_VALUE
+            │           └── NUMBER(100)
+            ├── METHOD_DECL(update)
+            │   ├── RETURN_TYPE(void)
+            │   ├── PARAMS
+            │   └── BODY
+            │       └── BLOCK
+            │           ├── VAR_DECL_GROUP
+            │           │   └── VAR_DECL(int x)
+            │           │       ├── TYPE(int)
+            │           │       ├── NAME(x)
+            │           │       └── INIT_VALUE
+            │           │           └── NUMBER(50)
+            │           └── PRINT_STMT(print)
+            │               └── IDENTIFIER(x)
+            └── METHOD_DECL(main)
+                ├── RETURN_TYPE(void)
+                ├── PARAMS
+                └── BODY
+                    └── BLOCK
+                        ├── EXPR_STMT()
+                        │   └── METHOD_CALL(update)
+                        │       └── ARGS
+                        └── PRINT_STMT(print)
+                            └── IDENTIFIER(x)
+
+═══════════════════════════════════════════════════
+  End of AST
+═══════════════════════════════════════════════════
