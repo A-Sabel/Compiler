@@ -1188,45 +1188,46 @@ public class MainGUI2 extends JFrame {
 
         new Thread(() -> {
             try {
+                long startTime = System.currentTimeMillis();
                 CompilerPipeline pipeline = new CompilerPipeline();
                 CompilerPipeline.CompileResult compileResult = pipeline.compile(code);
+                long endTime = System.currentTimeMillis();
                 String timeStr = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+                String duration = (endTime - startTime) + "ms";
 
                 if (compileResult.errors.isEmpty()) {
                     SwingUtilities.invokeLater(() -> 
-                        appendConsole("\u2713 [" + timeStr + "] Compilation successful!", SUCCESS_GREEN));
+                        appendConsole("\u2713 [" + timeStr + "] Compilation successful (" + duration + ")", SUCCESS_GREEN));
 
                     // Capture runtime output
                     ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                     PrintStream originalOut = System.out;
                     PrintStream originalErr = System.err;
-                    String runtimeOutput;
+                    
                     try (PrintStream capture = new PrintStream(buffer, true)) {
                         System.setOut(capture);
                         System.setErr(capture);
                         
                         Interpreter interpreter = new Interpreter();
-                        Object result = interpreter.execute(compileResult.instructions);
-                        if (result != null) capture.println(result);
+                        interpreter.execute(compileResult.instructions);
                         
-                        runtimeOutput = buffer.toString();
+                        final String runtimeOutput = buffer.toString();
+                        SwingUtilities.invokeLater(() -> {
+                            runtimeArea.setText(runtimeOutput.isEmpty() ? "<no runtime output>" : runtimeOutput);
+                            appendConsole("\u2713 [" + timeStr + "] Execution completed.", SUCCESS_GREEN);
+                            
+                            // Populate the Generated Code tab with the TAC instructions
+                            StringBuilder irText = new StringBuilder("; Generated Intermediate Representation\n");
+                            irText.append("; ──────────────────────────────────────\n");
+                            for (Instruction ins : compileResult.instructions) {
+                                irText.append(ins.toString()).append("\n");
+                            }
+                            generatedCodeArea.setText(irText.toString());
+                        });
                     } finally {
                         System.setOut(originalOut);
                         System.setErr(originalErr);
                     }
-
-                    SwingUtilities.invokeLater(() -> {
-                        runtimeArea.setText(runtimeOutput.isEmpty() ? "<no runtime output>" : runtimeOutput);
-                        appendConsole("\u2713 [" + timeStr + "] Execution completed.", SUCCESS_GREEN);
-                        
-                        // Populate the Generated Code tab with the TAC instructions
-                        StringBuilder irText = new StringBuilder("; Generated Intermediate Representation\n");
-                        irText.append("; ──────────────────────────────────────\n");
-                        for (Instruction ins : compileResult.instructions) {
-                            irText.append(ins.toString()).append("\n");
-                        }
-                        generatedCodeArea.setText(irText.toString());
-                    });
                 } else {
                     SwingUtilities.invokeLater(() -> {
                         errorCount = compileResult.errors.size();
