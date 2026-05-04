@@ -3,9 +3,16 @@
     "configurations": [
         {
             "type": "java",
+            "name": "MainGUI2",
+            "request": "launch",
+            "mainClass": "compiler.ui.MainGUI2",
+            "projectName": "compiler"
+        },
+        {
+            "type": "java",
             "name": "Run MainGUI",
             "request": "launch",
-            "mainClass": "compiler.ui.MainGUI",
+            "mainClass": "compiler.ui.MainGUI2",
             "projectName": "compiler"
         }
     ]
