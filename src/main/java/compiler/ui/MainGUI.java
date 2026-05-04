@@ -10,13 +10,19 @@ import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
 
 import javax.swing.BorderFactory;
 import javax.swing.GroupLayout;
@@ -42,15 +48,12 @@ import javax.swing.WindowConstants;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 
-import compiler.codegen.CodeGenerator;
-import compiler.lexer.Lexer;
+import compiler.CompilerPipeline;
+import compiler.codegen.Instruction;
 import compiler.lexer.SymbolTable;
 import compiler.lexer.models.Tokens;
-import compiler.parser.Parser;
-import compiler.parser.ast.ASTNode;
-import compiler.optimizer.Optimizer;
-import compiler.semantics.SemanticAnalyzer;
 import compiler.util.ErrorHandler;
+import compiler.vm.Interpreter;
 
 /* VIEW CLASS: Main Application Window
 Description: The primary JFrame holding the Input, Output, and Stats panels.
@@ -69,6 +72,8 @@ public class MainGUI extends JFrame {
     private final JTextArea errorDetailArea;
     private final JTable generatedCodeTable;
     private final javax.swing.table.DefaultTableModel generatedCodeModel;
+    private final JTextArea runtimeOutputArea;
+    private final JTextArea outputLogArea;
 
     // ResultTable replaces the old inline table logic
     private final ResultTable resultTable;
@@ -84,6 +89,7 @@ public class MainGUI extends JFrame {
     private JPanel outputPanel;
     private JButton outputPopoutButton;
     private JFrame outputWindow;
+    private final DateTimeFormatter logTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     public MainGUI() {
         initComponents();
@@ -151,6 +157,26 @@ public class MainGUI extends JFrame {
         generatedCodeTable.setFont(new Font("Monospaced", Font.PLAIN, 14));
         JScrollPane generatedCodeScrollPane = new JScrollPane(generatedCodeTable);
         BottomSection.addTab("Generated Code", generatedCodeScrollPane);
+
+        runtimeOutputArea = new JTextArea();
+        runtimeOutputArea.setEditable(false);
+        runtimeOutputArea.setFont(new Font("Monospaced", Font.PLAIN, 13));
+        runtimeOutputArea.setBackground(new Color(245, 247, 252));
+        runtimeOutputArea.setForeground(new Color(44, 58, 75));
+        runtimeOutputArea.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        JScrollPane runtimeOutputScrollPane = new JScrollPane(runtimeOutputArea);
+        BottomSection.addTab("Runtime Output", runtimeOutputScrollPane);
+
+        outputLogArea = new JTextArea();
+        outputLogArea.setEditable(false);
+        outputLogArea.setFont(new Font("Monospaced", Font.PLAIN, 13));
+        outputLogArea.setBackground(new Color(245, 247, 252));
+        outputLogArea.setForeground(new Color(44, 58, 75));
+        outputLogArea.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        JScrollPane outputLogScrollPane = new JScrollPane(outputLogArea);
+        BottomSection.addTab("Output Log", outputLogScrollPane);
+
+        attachOutputLogger();
 
         // Initialize all labels to zero
         updateStatLabels(0, 0, 0, 0);
@@ -255,32 +281,46 @@ public class MainGUI extends JFrame {
 
             ErrorHandler.clear(); 
             errorDetailArea.setText("");
+            appendOutputLog("Compile requested");
 
             // Run in background to keep GUI responsive
             new Thread(() -> {
                 long startTime = System.nanoTime();
-                
-                // Phase 1: Lexical Analysis (Scanner)
-                Lexer lexer = new Lexer(code);
-                List<Tokens> tokens = lexer.tokenize();
-                
-                // Phase 2: Syntax Analysis (Parser)
-                Parser parser = new Parser(tokens);
-                ASTNode rootNode = parser.parse();
-                
-                // Phase 3: Semantic Analysis (Logic & Types)
-                SemanticAnalyzer semanticAnalyzer = new SemanticAnalyzer();
-                semanticAnalyzer.analyze(rootNode);
-                
-                // Phase 4: Optimization (optional AST-level improvements)
-                Optimizer optimizer = new Optimizer();
-                Optimizer.OptimizeResult optimizeResult = optimizer.optimize(rootNode);
-                ASTNode optimizedRoot = optimizeResult.node;
-                rootNode = optimizedRoot;
-                
-                // Phase 5: Code Generation
-                CodeGenerator codeGen = new CodeGenerator();
-                String assembly = codeGen.generate(rootNode);
+
+                CompilerPipeline pipeline = new CompilerPipeline();
+                CompilerPipeline.CompileResult compileResult = pipeline.compile(code);
+                List<Tokens> tokens = compileResult.tokens;
+                List<Instruction> instructions = compileResult.instructions;
+                String runtimeOutput = "";
+
+                appendOutputLog("Compilation finished with " + compileResult.errors.size() + " error(s)");
+
+                if (compileResult.errors.isEmpty()) {
+                    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                    PrintStream originalOut = System.out;
+                    PrintStream originalErr = System.err;
+                    try (PrintStream capture = new PrintStream(buffer, true)) {
+                        System.setOut(capture);
+                        System.setErr(capture);
+                        Interpreter interpreter = new Interpreter();
+                        Object result = interpreter.execute(instructions);
+                        if (result != null) {
+                            capture.println(result);
+                        }
+                    } finally {
+                        System.setOut(originalOut);
+                        System.setErr(originalErr);
+                    }
+                    runtimeOutput = buffer.toString();
+                    if (runtimeOutput.isBlank()) {
+                        appendOutputLog("Runtime completed with no direct output");
+                    } else {
+                        appendOutputLog("Runtime output captured:\n" + runtimeOutput.trim());
+                    }
+                } else {
+                    appendOutputLog("Runtime skipped because compilation produced errors");
+                }
+                final String capturedRuntimeOutput = runtimeOutput;
                 
                 long endTime = System.nanoTime();
                 long executionTimeMs = (endTime - startTime) / 1_000_000; 
@@ -298,8 +338,8 @@ public class MainGUI extends JFrame {
                     categoryCounts.put(cat, categoryCounts.getOrDefault(cat, 0) + 1);
                 }
 
-                // Collect errors from ALL THREE phases
-                List<String> errors = ErrorHandler.getErrors();
+                // Collect errors from the unified pipeline
+                List<String> errors = compileResult.errors;
 
                 int totalTokens  = tokens.size();
                 int uniqueIds    = SymbolTable.getInstance().getAllIdentifiers().size();
@@ -314,20 +354,25 @@ public class MainGUI extends JFrame {
                     applyTableFilter();
 
                     // Populate the Generated Code table
-                    String[] lines = assembly.split("\n");
                     generatedCodeModel.setRowCount(0);
-                    for (String line : lines) {
-                        if (line.trim().isEmpty()) continue;
-                        String[] parts = line.split(" ", 2);
-                        String instr = parts[0];
-                        String operands = parts.length > 1 ? parts[1] : "";
-                        generatedCodeModel.addRow(new Object[]{ instr, operands });
+                    for (Instruction instruction : instructions) {
+                        generatedCodeModel.addRow(new Object[]{
+                            instruction.getOpcode().name(),
+                            instruction.toString()
+                        });
                     }
-                    OutputArea.setText("CODE GENERATED SUCCESSFULLY");
+                    OutputArea.setText(errors.isEmpty()
+                            ? "CODE GENERATED AND EXECUTED SUCCESSFULLY"
+                            : "CODE GENERATED WITH ERRORS");
+
+                        runtimeOutputArea.setText(capturedRuntimeOutput.isBlank()
+                            ? (errors.isEmpty() ? "<no runtime output>" : "<runtime skipped due to compile errors>")
+                            : capturedRuntimeOutput);
 
                     // Display the accumulated errors in the GUI's Error Tab
                     if (errorCount > 0) {
                         errorDetailArea.setText(String.join("\n", errors));
+                            appendOutputLog("Compilation errors:\n" + String.join("\n", errors));
                     } else {
                         errorDetailArea.setText("Compilation Successful! No errors detected.");
                     }
@@ -461,6 +506,35 @@ public class MainGUI extends JFrame {
         if (mainVerticalSplit != null) {
             mainVerticalSplit.setDividerLocation(0.72);
         }
+    }
+
+    private void appendOutputLog(String message) {
+        logger.info(message);
+    }
+
+    private void attachOutputLogger() {
+        logger.setUseParentHandlers(false);
+        for (Handler handler : logger.getHandlers()) {
+            logger.removeHandler(handler);
+        }
+
+        Handler uiHandler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (record == null) return;
+                String message = record.getLevel() + ": " + record.getMessage();
+                SwingUtilities.invokeLater(() -> outputLogArea.append(
+                        String.format("[%s] %s%n",
+                                LocalDateTime.now().format(logTimeFormatter), message)));
+            }
+
+            @Override
+            public void flush() { }
+
+            @Override
+            public void close() throws SecurityException { }
+        };
+        logger.addHandler(uiHandler);
     }
 
     // ── Line-number gutter ────────────────────────────────────────────────────

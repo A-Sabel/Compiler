@@ -23,31 +23,26 @@ public class BytecodeGenerator {
         public int addConstant(String key) {
             return pool.computeIfAbsent(key, k -> nextIndex++);
         }
-
-        public int indexOf(String key) {
-            return pool.getOrDefault(key, -1);
-        }
-
-        public Map<String, Integer> entries() {
-            return pool;
-        }
     }
 
     private static class StackTracker {
         private int current  = 0;
         private int maxDepth = 0;
 
-        public void push()    { push(1); }
+        public void push()      { push(1); }
         public void push(int n) {
             current += n;
             if (current > maxDepth) maxDepth = current;
         }
         public void pop(int n) {
             current -= n;
-            if (current < 0) current = 0;
+            if (current < 0) {
+                throw new IllegalStateException(
+                        "Stack underflow: attempted to pop " + n +
+                        " from depth " + (current + n));
+            }
         }
         public int maxDepth() { return maxDepth; }
-        public int current()  { return current;  }
         public void reset()   { current = 0; maxDepth = 0; }
     }
 
@@ -103,10 +98,10 @@ public class BytecodeGenerator {
     private final ConstantPool  constantPool  = new ConstantPool();
     private final StackTracker  stackTracker  = new StackTracker();
     private final SlotAllocator slotAllocator = new SlotAllocator();
-    private int    currentSourceLine      = 0;
-    private String sourceFileName         = null;
-    private boolean unreachable           = false;
-    private boolean currentMethodIsInstance = true;
+    private int    currentSourceLine        = 0;
+    private String sourceFileName           = null;
+    private boolean unreachable             = false;
+    private Map<String, String> methodVarTypes = null;
 
     public void setSourceFileName(String name) { this.sourceFileName = name; }
     public void setCurrentSourceLine(int line)  { this.currentSourceLine = line; }
@@ -209,26 +204,6 @@ public class BytecodeGenerator {
         }
     }
 
-    private Opcode typedArrayLoadOpcode(String jvmType) {
-        switch (jvmType) {
-            case "J": return Opcode.LALOAD;
-            case "F": return Opcode.FALOAD;
-            case "D": return Opcode.DALOAD;
-            case "I": return Opcode.IALOAD;
-            default:  return Opcode.AALOAD;
-        }
-    }
-
-    private Opcode typedArrayStoreOpcode(String jvmType) {
-        switch (jvmType) {
-            case "J": return Opcode.LASTORE;
-            case "F": return Opcode.FASTORE;
-            case "D": return Opcode.DASTORE;
-            case "I": return Opcode.IASTORE;
-            default:  return Opcode.AASTORE;
-        }
-    }
-
     private static String inferLiteralType(String literal) {
         if (literal == null || "null".equals(literal)) return "A";
         if ("true".equals(literal) || "false".equals(literal)) return "I";
@@ -256,11 +231,10 @@ public class BytecodeGenerator {
             emitConversion(result, src, fromJvmType, toJvmType);
             return result;
         }
-        return src; // leave narrowing to explicit casts
+        return src;
     }
 
     private boolean isWideningConversion(String from, String to) {
-        // Numeric widening order: I → J → F → D
         int fromRank = typeRank(from);
         int toRank   = typeRank(to);
         return fromRank >= 0 && toRank >= 0 && toRank > fromRank;
@@ -272,7 +246,7 @@ public class BytecodeGenerator {
             case "J": return 1;
             case "F": return 2;
             case "D": return 3;
-            default:  return -1; // reference types — no widening rank
+            default:  return -1;
         }
     }
 
@@ -313,16 +287,16 @@ public class BytecodeGenerator {
             }
             if (jvmType.equals("D")) {
                 double dv = Double.parseDouble(literal.replaceAll("[Dd]$", ""));
-                if (dv == 0.0)     emit(Instruction.constPush(result, literal, "DCONST_0"));
-                else if (dv == 1.0)emit(Instruction.constPush(result, literal, "DCONST_1"));
+                if (dv == 0.0)      emit(Instruction.constPush(result, literal, "DCONST_0"));
+                else if (dv == 1.0) emit(Instruction.constPush(result, literal, "DCONST_1"));
                 else { int idx = constantPool.addConstant("DOUBLE:" + literal); emit(Instruction.ldc(result, idx)); }
                 stackTracker.push(2); return;
             }
             int iv = Integer.parseInt(literal);
             String mnemonic;
-            if      (iv == -1)                  mnemonic = "ICONST_M1";
-            else if (iv >= 0 && iv <= 5)        mnemonic = "ICONST_" + iv;
-            else if (iv >= -128 && iv <= 127)   mnemonic = "BIPUSH";
+            if      (iv == -1)                    mnemonic = "ICONST_M1";
+            else if (iv >= 0 && iv <= 5)          mnemonic = "ICONST_" + iv;
+            else if (iv >= -128 && iv <= 127)     mnemonic = "BIPUSH";
             else if (iv >= -32768 && iv <= 32767) mnemonic = "SIPUSH";
             else {
                 int idx = constantPool.addConstant("INT:" + literal);
@@ -563,8 +537,6 @@ public class BytecodeGenerator {
         if (returnType == null) returnType = "void";
 
         boolean isInstance = !hasModifier(node, "static");
-        currentMethodIsInstance = isInstance;
-
         slotAllocator.reset(isInstance);
         stackTracker.reset();
 
@@ -582,6 +554,8 @@ public class BytecodeGenerator {
         emit(Instruction.methodDescriptor(name, descriptor));
 
         Map<String, String> varTypes = new HashMap<>();
+        if (isInstance) varTypes.put("this", "A");
+
         if (params != null) {
             for (ASTNode param : params.getChildren()) {
                 String pName = getChildValue(param, "NAME");
@@ -594,7 +568,9 @@ public class BytecodeGenerator {
         }
 
         unreachable = false;
+        methodVarTypes = varTypes;
         visitChildOfType(node, "BODY");
+        methodVarTypes = null;
 
         emit(Instruction.maxStack(name, stackTracker.maxDepth()));
         emit(Instruction.maxLocals(name, slotAllocator.maxLocals()));
@@ -609,11 +585,12 @@ public class BytecodeGenerator {
         String jvmType = toJvmDescriptor(varType);
 
         slotAllocator.allocate(varName, jvmType);
+        if (methodVarTypes != null) methodVarTypes.put(varName, jvmType);
 
         ASTNode initValue = getChildOfType(node, "INIT_VALUE");
         if (initValue != null) {
             String src = visit(initValue);
-
+            // visit() above already pushed the value onto the stack tracker.
             String srcJvmType = inferNodeJvmType(initValue.getChildren().isEmpty()
                     ? initValue : initValue.getChildren().get(0));
             src = emitWideningIfNeeded(src, srcJvmType, jvmType);
@@ -621,6 +598,7 @@ public class BytecodeGenerator {
             Opcode storeOpc = typedStoreOpcode(jvmType);
             emit(Instruction.typedStore(storeOpc,
                     String.valueOf(slotAllocator.slotOf(varName)), src));
+            // The store consumes the value that visit() pushed.
             stackTracker.pop(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
         } else {
             emitFieldDefault(varName, jvmType);
@@ -716,7 +694,8 @@ public class BytecodeGenerator {
             String t = child.getType();
             if (!t.equals("CONDITION") && !t.equals("UPDATE")
                     && !t.equals("BODY") && !t.equals("BLOCK")) {
-                visit(child); break;
+                visit(child);
+                break;
             }
         }
 
@@ -747,6 +726,7 @@ public class BytecodeGenerator {
     private void handleTry(ASTNode node) {
         String tryStart = newLabel("TRY_START");
         String tryEnd   = newLabel("TRY_END");
+        String afterAll = newLabel("TRY_AFTER");
 
         emit(Instruction.label(tryStart));
         unreachable = false;
@@ -754,9 +734,9 @@ public class BytecodeGenerator {
         ASTNode tryBody = getChildOfType(node, "BODY");
         if (tryBody != null) visit(tryBody);
 
-        emit(Instruction.label(tryEnd));
-        String afterAll = newLabel("TRY_AFTER");
+        // Jump then label: exception table range [tryStart, tryEnd) excludes the jump.
         emit(Instruction.jump(afterAll));
+        emit(Instruction.label(tryEnd));
 
         for (ASTNode child : node.getChildren()) {
             if (!"CATCH".equals(child.getType())) continue;
@@ -774,8 +754,13 @@ public class BytecodeGenerator {
 
             if (catchParam != null) {
                 slotAllocator.allocate(catchParam, "A");
+                if (methodVarTypes != null) methodVarTypes.put(catchParam, "A");
+                // The JVM pushes the exception object onto the operand stack on
+                // handler entry; account for that push before the store.
+                stackTracker.push();
                 emit(Instruction.typedStore(Opcode.ASTORE,
                         String.valueOf(slotAllocator.slotOf(catchParam)), "exception"));
+                stackTracker.pop(1);
             }
 
             ASTNode catchBody = getChildOfType(child, "BODY");
@@ -869,9 +854,9 @@ public class BytecodeGenerator {
 
         String rhs;
         if (!op.equals("=")) {
-            String lhsVal    = addressOf(left);
-            String rhsVal    = visit(right);
-            String opStr     = op.replace("=", "");
+            String lhsVal     = addressOf(left);
+            String rhsVal     = visit(right);
+            String opStr      = op.replace("=", "");
             String lhsJvmType = slotAllocator.typeOf(left.getType().equals("IDENTIFIER")
                     ? left.getValue() : "");
             rhs = newTemp();
@@ -881,6 +866,9 @@ public class BytecodeGenerator {
                 emit(Instruction.binary(binOp, rhs, lhsVal, opStr, rhsVal));
                 stackTracker.push();
             }
+            // Widen compound-op result to the target type if needed.
+            String rhsJvmType = inferNodeJvmType(right);
+            rhs = emitWideningIfNeeded(rhs, rhsJvmType, lhsJvmType);
         } else {
             rhs = visit(right);
             if (left.getType().equals("IDENTIFIER")) {
@@ -977,26 +965,51 @@ public class BytecodeGenerator {
         return result;
     }
 
+    // FIX #3 (prefix ++/--): addressOf(IDENTIFIER) does NOT push onto the stack,
+    // so the const push from emitSpecializedConst is only 1 push total, not 2.
+    // FIX #2 (postfix ++/--): same — pop(1) after binary, not pop(2).
     private String handleUnaryOp(ASTNode node) {
         ASTNode operand = node.getChildren().get(0);
         String  opStr   = node.getValue();
         String  result  = newTemp();
 
         switch (opStr) {
-            case "-": { String val = visit(operand); emit(Instruction.unary(Opcode.NEG, result, val)); stackTracker.pop(1); stackTracker.push(); break; }
-            case "!": { String val = visit(operand); emit(Instruction.unary(Opcode.NOT, result, val)); stackTracker.pop(1); stackTracker.push(); break; }
-            case "~": { String val = visit(operand); emit(Instruction.unary(Opcode.BITWISE_NOT, result, val)); stackTracker.pop(1); stackTracker.push(); break; }
+            case "-": {
+                String val = visit(operand);
+                emit(Instruction.unary(Opcode.NEG, result, val));
+                stackTracker.pop(1); stackTracker.push();
+                break;
+            }
+            case "!": {
+                String val = visit(operand);
+                emit(Instruction.unary(Opcode.NOT, result, val));
+                stackTracker.pop(1); stackTracker.push();
+                break;
+            }
+            case "~": {
+                String val = visit(operand);
+                emit(Instruction.unary(Opcode.BITWISE_NOT, result, val));
+                stackTracker.pop(1); stackTracker.push();
+                break;
+            }
             case "++": {
-                String addr = addressOf(operand); String one = newTemp();
-                emitSpecializedConst(one, "1", "I");
+                // FIX #3: addressOf does not push; only the const "1" is pushed (1 slot).
+                String addr = addressOf(operand);
+                String one  = newTemp();
+                emitSpecializedConst(one, "1", "I"); // pushes 1
                 emit(Instruction.binary(Opcode.IADD, result, addr, "+", one));
-                stackTracker.pop(2); stackTracker.push(); storeInto(operand, result); break;
+                stackTracker.pop(1); stackTracker.push(); // net: consume the "1", produce result
+                storeInto(operand, result);
+                break;
             }
             case "--": {
-                String addr = addressOf(operand); String one = newTemp();
+                String addr = addressOf(operand);
+                String one  = newTemp();
                 emitSpecializedConst(one, "1", "I");
                 emit(Instruction.binary(Opcode.ISUB, result, addr, "-", one));
-                stackTracker.pop(2); stackTracker.push(); storeInto(operand, result); break;
+                stackTracker.pop(1); stackTracker.push();
+                storeInto(operand, result);
+                break;
             }
             default: throw new RuntimeException("Unknown unary operator: " + opStr);
         }
@@ -1004,18 +1017,22 @@ public class BytecodeGenerator {
     }
 
     private String handlePostfixOp(ASTNode node) {
-        ASTNode operand = node.getChildren().get(0);
-        String  opStr   = node.getValue();
+        ASTNode operand  = node.getChildren().get(0);
+        String  opStr    = node.getValue();
         String  original = newTemp();
-        String  addr     = addressOf(operand);
+        String  addr     = addressOf(operand); // does NOT push for IDENTIFIER
         emit(Instruction.copy(original, addr));
         String one = newTemp();
-        emitSpecializedConst(one, "1", "I");
+        emitSpecializedConst(one, "1", "I"); // pushes 1
         String updated = newTemp();
-        if (opStr.equals("++"))      emit(Instruction.binary(Opcode.IADD, updated, addr, "+", one));
-        else if (opStr.equals("--")) emit(Instruction.binary(Opcode.ISUB, updated, addr, "-", one));
-        else throw new RuntimeException("Unknown postfix operator: " + opStr);
-        stackTracker.pop(2); stackTracker.push();
+        if (opStr.equals("++"))
+            emit(Instruction.binary(Opcode.IADD, updated, addr, "+", one));
+        else if (opStr.equals("--"))
+            emit(Instruction.binary(Opcode.ISUB, updated, addr, "-", one));
+        else
+            throw new RuntimeException("Unknown postfix operator: " + opStr);
+        // FIX #2: only "1" was pushed (1 slot); binary produces 1 — net pop(1)+push(1).
+        stackTracker.pop(1); stackTracker.push();
         storeInto(operand, updated);
         return original;
     }
@@ -1051,28 +1068,35 @@ public class BytecodeGenerator {
     }
 
     private String handleArrayAccess(ASTNode node) {
-        String base   = visit(node.getChildren().get(0));
-        String index  = visit(node.getChildren().get(1));
+        String base   = visit(node.getChildren().get(0)); // pushes 1
+        String index  = visit(node.getChildren().get(1)); // pushes 1
         String result = newTemp();
         emit(Instruction.binary(Opcode.ARRAY_LOAD, result, base, null, index));
-        stackTracker.pop(2); stackTracker.push();
+        stackTracker.pop(2); stackTracker.push(); // consumes base+index, produces result
         return result;
     }
 
     private String handleMethodCall(ASTNode node) {
-        ASTNode receiver    = getChildOfType(node, "RECEIVER");
-        ASTNode args        = getChildOfType(node, "ARGS");
-        ASTNode methodDecl  = getChildOfType(node, "METHOD_DECL"); // present if the parser attaches it
+        ASTNode receiver   = getChildOfType(node, "RECEIVER");
+        ASTNode args       = getChildOfType(node, "ARGS");
+        ASTNode methodDecl = getChildOfType(node, "METHOD_DECL");
         boolean hasReceiver = receiver != null && !receiver.getChildren().isEmpty();
 
-        boolean isStatic = false;
+        boolean isStatic  = false;
+        String returnType = "void";
         if (methodDecl != null) {
             isStatic = hasModifier(methodDecl, "static");
+            String declaredReturn = getChildValue(methodDecl, "RETURN_TYPE");
+            if (declaredReturn != null) returnType = declaredReturn;
         }
 
         String objAddr = null;
-        if (hasReceiver && !isStatic) {
+        if (hasReceiver && !isStatic && receiver != null) {
             objAddr = visit(receiver.getChildren().get(0));
+            stackTracker.push();
+        } else if (!isStatic && !hasReceiver) {
+            // Instance method called without explicit receiver: use implicit 'this'
+            objAddr = "this";
             stackTracker.push();
         }
 
@@ -1088,16 +1112,19 @@ public class BytecodeGenerator {
             }
         }
 
-        String descriptor = buildMethodDescriptor(argTypes, "V");
+        String descriptor = buildMethodDescriptor(argTypes, returnType);
 
         String result = newTemp();
-        if (!isStatic && hasReceiver) {
+        if (!isStatic) {
+            // Instance method: always use virtual call (with explicit or implicit receiver)
             emit(Instruction.callVirtualWithDescriptor(result, objAddr, node.getValue(), descriptor, argCount));
+            stackTracker.pop(argCount + 1); // receiver + arguments
         } else {
+            // Static method: use regular call
             emit(Instruction.callWithDescriptor(result, node.getValue(), descriptor, argCount));
+            stackTracker.pop(argCount);
         }
-        stackTracker.pop(argCount + (hasReceiver && !isStatic ? 1 : 0));
-        stackTracker.push();
+        stackTracker.push(); // return value (even void methods push a placeholder temp)
         return result;
     }
 
@@ -1112,25 +1139,47 @@ public class BytecodeGenerator {
         return result;
     }
 
+    // addressOf: returns the name/temp for the operand WITHOUT pushing to the stack
+    // for simple IDENTIFIERs (the value is already in a slot, not on the operand stack).
     private String addressOf(ASTNode node) {
         switch (node.getType()) {
-            case "IDENTIFIER":   return node.getValue();
-            case "ARRAY_ACCESS": return handleArrayAccess(node);
-            case "FIELD_ACCESS": return handleFieldAccess(node);
+            case "IDENTIFIER":   return node.getValue();   // no push
+            case "ARRAY_ACCESS": return handleArrayAccess(node); // pushes 1
+            case "FIELD_ACCESS": return handleFieldAccess(node); // pushes 1
             default: throw new RuntimeException("Cannot take address of: " + node.getType());
         }
     }
 
+    // FIX #1: storeInto for IDENTIFIER uses typed store and only pops what was
+    // actually pushed. For a plain identifier assignment the caller (handleAssign,
+    // handleUnaryOp, handlePostfixOp) already holds the value in a temp name;
+    // the typed store instruction consumes nothing from the conceptual TAC stack
+    // because in TAC, stores are register-to-slot, not stack-to-slot. We therefore
+    // do NOT call stackTracker.pop here for the IDENTIFIER case — the push/pop is
+    // accounted for at the site that produced `src`.
     private void storeInto(ASTNode left, String src) {
         switch (left.getType()) {
-            case "IDENTIFIER":
-                emit(Instruction.copy(left.getValue(), src));
+            case "IDENTIFIER": {
+                String varName = left.getValue();
+                int slot = slotAllocator.slotOf(varName);
+                if (slot >= 0) {
+                    String jvmType  = slotAllocator.typeOf(varName);
+                    Opcode storeOpc = typedStoreOpcode(jvmType);
+                    emit(Instruction.typedStore(storeOpc, String.valueOf(slot), src));
+                    // No stackTracker.pop: TAC stores are register→slot; the value
+                    // temp was already accounted for by whoever computed it.
+                } else {
+                    emit(Instruction.copy(varName, src));
+                }
                 break;
+            }
             case "ARRAY_ACCESS": {
-                String base  = visit(left.getChildren().get(0));
-                String index = visit(left.getChildren().get(1));
+                // FIX #6: visit(base) pushes 1, visit(index) pushes 1. `src` is a
+                // register name, not an extra stack push. Total pushes here: 2.
+                String base  = visit(left.getChildren().get(0)); // +1
+                String index = visit(left.getChildren().get(1)); // +1
                 emit(Instruction.arrayStore(base, index, src));
-                stackTracker.pop(3);
+                stackTracker.pop(2); // consume base + index
                 break;
             }
             case "FIELD_ACCESS": {
@@ -1138,7 +1187,8 @@ public class BytecodeGenerator {
                 String  obj  = (recv != null && !recv.getChildren().isEmpty())
                         ? visit(recv.getChildren().get(0)) : "this";
                 emit(Instruction.fieldStore(obj, left.getValue(), src));
-                stackTracker.pop(2);
+                // visit(receiver) pushed 1 (or 0 for "this" fallback).
+                if (recv != null && !recv.getChildren().isEmpty()) stackTracker.pop(1);
                 break;
             }
             default: throw new RuntimeException("Invalid assignment target: " + left.getType());
@@ -1158,6 +1208,12 @@ public class BytecodeGenerator {
             case ">":  return Opcode.GREATER_THAN;
             case "<=": return Opcode.LESS_EQUAL;
             case ">=": return Opcode.GREATER_EQUAL;
+            case "&":  return Opcode.IAND;
+            case "|":  return Opcode.LOR;
+            case "^":  return Opcode.IXOR;
+            case "<<": return Opcode.ISHL;
+            case ">>": return Opcode.ISHR;
+            case ">>>": return Opcode.IUSHR;
             default:   throw new RuntimeException("Unknown binary operator: " + op);
         }
     }

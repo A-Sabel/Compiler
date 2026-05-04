@@ -633,8 +633,44 @@ public class Parser {
     }
 
     private ASTNode parseLogicalAnd() {
-        ASTNode left = parseEquality();
+        ASTNode left = parseBitwiseOr();
         while (check("OPERATOR", "&&")) {
+            String op = currentLexeme(); advance();
+            ASTNode right = parseBitwiseOr();
+            ASTNode node = ASTNode.of("BINARY_OP", op);
+            node.addChild(left); node.addChild(right);
+            left = node;
+        }
+        return left;
+    }
+
+    private ASTNode parseBitwiseOr() {
+        ASTNode left = parseBitwiseXor();
+        while (check("OPERATOR", "|") && !check("OPERATOR", "||")) {
+            String op = currentLexeme(); advance();
+            ASTNode right = parseBitwiseXor();
+            ASTNode node = ASTNode.of("BINARY_OP", op);
+            node.addChild(left); node.addChild(right);
+            left = node;
+        }
+        return left;
+    }
+
+    private ASTNode parseBitwiseXor() {
+        ASTNode left = parseBitwiseAnd();
+        while (check("OPERATOR", "^")) {
+            String op = currentLexeme(); advance();
+            ASTNode right = parseBitwiseAnd();
+            ASTNode node = ASTNode.of("BINARY_OP", op);
+            node.addChild(left); node.addChild(right);
+            left = node;
+        }
+        return left;
+    }
+
+    private ASTNode parseBitwiseAnd() {
+        ASTNode left = parseEquality();
+        while (check("OPERATOR", "&") && !check("OPERATOR", "&&")) {
             String op = currentLexeme(); advance();
             ASTNode right = parseEquality();
             ASTNode node = ASTNode.of("BINARY_OP", op);

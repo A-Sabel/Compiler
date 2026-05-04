@@ -303,3 +303,21 @@
 ## Last Updated
 
 May 3, 2026
+
+---
+
+## Recent Work (May 4, 2026)
+
+- Added a runnable `compiler.vm.InterpreterTest` harness and verified the interpreter with a small TAC program; it executed successfully and printed `5`.
+- Extended `Interpreter` to cover more TAC opcodes, including loads/stores, arrays, field access, object creation, and basic call handling.
+- Added interpreter metadata pre-scan for labels, method ranges, and exception table entries.
+- Ran a Java-only compile check for main sources with `javac`; main sources compiled successfully, with one unchecked-cast warning in `Interpreter.java`.
+- Attempted to run Maven tests, but `mvn` is not available in the current environment. A direct `javac` compile of test sources also failed because JUnit is not on the classpath.
+
+## Current Gaps / Risks
+
+- `Interpreter` still uses a simplified runtime model for objects and method dispatch; user-defined method invocation is only partially wired.
+- Exception handling is parsed but not fully enforced against catch types yet.
+- `Interpreter.java` has a small unchecked-cast warning that should be narrowed or suppressed locally.
+- `BytecodeGenerator.java` still contains many IDE style hints and a few runtime error paths that would benefit from clearer validation or tests.
+- Test execution is blocked until Maven or the required JUnit jars are installed.
