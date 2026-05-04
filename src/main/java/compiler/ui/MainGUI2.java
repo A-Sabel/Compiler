@@ -1,12 +1,15 @@
 package compiler.ui;
 import javax.swing.*;
 import javax.swing.border.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.plaf.basic.BasicSplitPaneDivider;
 import javax.swing.table.*;
 import javax.swing.text.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.*;
+import java.util.HashMap;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.io.BufferedReader;
@@ -20,6 +23,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import compiler.util.ErrorHandler;
 import compiler.CompilerPipeline;
+import compiler.lexer.SymbolTable;
 import compiler.codegen.Instruction;
 import compiler.vm.Interpreter;
 
@@ -121,6 +125,7 @@ public class MainGUI2 extends JFrame {
     private JLabel            lnColLabel;
     private JTextField        searchField;
     private JComboBox<String> filterCombo;
+    private TableRowSorter<DefaultTableModel> symbolSorter;
     private DefaultTableModel symbolModel;
     private JTextArea         generatedCodeArea;
     private JTextArea         runtimeArea;
@@ -769,11 +774,16 @@ public class MainGUI2 extends JFrame {
         p.setBackground(bg());
         p.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
 
-        // Search + Filter toolbar
+        // ── Search + Filter toolbar ──────────────────────────────────────────
         JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
         bar.setOpaque(false);
 
-        JLabel searchIcon = new JLabel("\uD83D\uDD0D"); // 🔍
+        // Category Filter
+        filterCombo = new JComboBox<>(new String[]{ "All Categories", "KEYWORD", "IDENTIFIER", "CONSTANT", "LITERAL", "OPERATOR", "PUNCTUATION" });
+        filterCombo.setFont(FONT_UI_SM);
+        filterCombo.addActionListener(e -> applySymbolFilter());
+
+        JLabel searchIcon = new JLabel("\uD83D\uDD0D");
         searchIcon.setFont(FONT_ICON);
         JLabel searchLbl  = new JLabel("Search:");
         searchLbl.setFont(FONT_UI_SM); searchLbl.setForeground(new Color(0x858585));
@@ -785,15 +795,25 @@ public class MainGUI2 extends JFrame {
         searchField.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(border()),
             BorderFactory.createEmptyBorder(3, 6, 3, 6)));
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            public void insertUpdate(DocumentEvent e) { applySymbolFilter(); }
+            public void removeUpdate(DocumentEvent e) { applySymbolFilter(); }
+            public void changedUpdate(DocumentEvent e) { applySymbolFilter(); }
+        });
 
+        bar.add(new JLabel("Category:")); bar.add(filterCombo);
+        bar.add(Box.createHorizontalStrut(10));
         bar.add(searchIcon); bar.add(searchLbl); bar.add(searchField);
 
-        String[] cols = {"Name","Type","Scope","Line Declared","Value"};
+        String[] cols = {"Regular Expression", "Token", "Attribute-Value"};
         symbolModel = new DefaultTableModel(cols, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         JTable sym = new JTable(symbolModel);
         styleTable(sym);
+        
+        symbolSorter = new TableRowSorter<>(symbolModel);
+        sym.setRowSorter(symbolSorter);
 
         JScrollPane scroll = new JScrollPane(sym);
         scroll.setBorder(BorderFactory.createLineBorder(border()));
@@ -803,6 +823,25 @@ public class MainGUI2 extends JFrame {
         p.add(bar,    BorderLayout.NORTH);
         p.add(scroll, BorderLayout.CENTER);
         return p;
+    }
+
+    private void applySymbolFilter() {
+        if (symbolSorter == null) return;
+        String text = searchField.getText().toLowerCase();
+        String category = (String) filterCombo.getSelectedItem();
+
+        RowFilter<DefaultTableModel, Object> rf = new RowFilter<>() {
+            @Override
+            public boolean include(Entry<? extends DefaultTableModel, ?> entry) {
+                String cat = entry.getStringValue(0);
+                String lex = entry.getStringValue(1).toLowerCase();
+
+                boolean matchesLex = lex.contains(text);
+                boolean matchesCat = category.equals("All Categories") || cat.equals(category);
+                return matchesLex && matchesCat;
+            }
+        };
+        symbolSorter.setRowFilter(rf);
     }
 
     private JButton buildSmallActionBtn(String text) {
@@ -1211,6 +1250,17 @@ public class MainGUI2 extends JFrame {
                         Interpreter interpreter = new Interpreter();
                         interpreter.execute(compileResult.instructions);
                         
+                        SwingUtilities.invokeLater(() -> {
+                            symbolModel.setRowCount(0);
+                            for (compiler.lexer.models.Tokens t : compileResult.tokens) {
+                                symbolModel.addRow(new Object[]{
+                                    t.getClass().getSimpleName().toUpperCase(),
+                                    t.getLexeme(),
+                                    getAttributeValue(t)
+                                });
+                            }
+                        });
+
                         final String runtimeOutput = buffer.toString();
                         SwingUtilities.invokeLater(() -> {
                             runtimeArea.setText(runtimeOutput.isEmpty() ? "<no runtime output>" : runtimeOutput);
@@ -1344,6 +1394,27 @@ public class MainGUI2 extends JFrame {
                 return c;
             }
         });
+    }
+
+    private String getAttributeValue(compiler.lexer.models.Tokens t) {
+        String category = t.getClass().getSimpleName().toUpperCase();
+        String lexeme   = t.getLexeme();
+
+        return switch (category) {
+            case "IDENTIFIER"   -> "Symbol Table Pointer: " + Integer.toHexString(System.identityHashCode(lexeme)).toUpperCase();
+            case "CONSTANT"     -> "Numeric Value: " + lexeme;
+            case "LITERAL"      -> lexeme.startsWith("'") ? "Char Literal" : "String Literal";
+            case "OPERATOR"     -> getOperatorType(lexeme);
+            default             -> "-";
+        };
+    }
+
+    private String getOperatorType(String op) {
+        if (op.matches("[+\\-*/%]")) return "Arithmetic Operator";
+        if (op.matches("==|!=|<|>|<=|>=")) return "Relational Operator";
+        if (op.matches("&&|\\|\\||!")) return "Logical Operator";
+        if (op.matches("=|\\+=|-=|\\*=|/=")) return "Assignment Operator";
+        return "Special Operator";
     }
 
     private void styleScrollBar(JScrollBar sb) {
