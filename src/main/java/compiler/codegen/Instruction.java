@@ -47,6 +47,7 @@ public final class Instruction {
         METHOD_END, // end method <name>
         PARAM, // param <name> declare incoming parameter
         ARG, // arg <value> push one call argument
+        LAMBDA_REF, // result = lambda reference to generated method
         CALL, // result = call <name> <argCount> (static)
         CALL_VIRTUAL, // result = callvirtual <obj> <name> <argCount>
         // §23.2: descriptor-carrying variants — preferred at all new call sites
@@ -187,6 +188,10 @@ public final class Instruction {
 
     public static Instruction arg(String value) {
         return new Instruction(Opcode.ARG, null, value, null, null);
+    }
+
+    public static Instruction lambdaRef(String result, String methodName) {
+        return new Instruction(Opcode.LAMBDA_REF, result, methodName, null, null);
     }
 
     public static Instruction call(String result, String name, int argCount) {
@@ -422,6 +427,8 @@ public final class Instruction {
                 return "param " + arg1;
             case ARG:
                 return "arg " + arg1;
+            case LAMBDA_REF:
+                return result + " = lambda_ref " + arg1;
 
             case CALL:
                 return (result != null ? result + " = " : "") + "call " + arg1 + " " + op;

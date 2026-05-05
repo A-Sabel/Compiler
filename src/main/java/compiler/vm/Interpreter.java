@@ -394,6 +394,10 @@ public class Interpreter {
                         context.temps.put(instr.getResult(), parseLiteral(instr.getArg1()));
                         break;
                     }
+                    case LAMBDA_REF: {
+                        context.temps.put(instr.getResult(), instr.getArg1());
+                        break;
+                    }
                     case DUP:
                     case DEFAULT_CONSTRUCTOR:
                     case STATIC_INIT:

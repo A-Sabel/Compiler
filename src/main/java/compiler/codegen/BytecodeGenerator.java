@@ -845,7 +845,8 @@ public class BytecodeGenerator {
         node.setAttribute("lambda_name", lambdaName);
         pendingLambdas.add(node);
         String result = newTemp();
-        emitSpecializedConst(result, "\"" + lambdaName + "\"", "Ljava/lang/String;");
+        emit(Instruction.lambdaRef(result, lambdaName));
+        stackTracker.push();
         return result;
     }
 
