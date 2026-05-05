@@ -811,11 +811,11 @@ public class MainGUI2 extends JFrame {
     private JSplitPane buildCenter() {
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
                 buildTopArea(), buildConsole());
-        split.setResizeWeight(0.70);
+        split.setResizeWeight(0.70); 
         split.setDividerSize(4);
         split.setBorder(null);
         split.setBackground(bg());
-        SwingUtilities.invokeLater(() -> split.setDividerLocation(0.70));
+        SwingUtilities.invokeLater(() -> split.setDividerLocation(0.70)); 
         styleDivider(split);
         return split;
     }
@@ -823,11 +823,11 @@ public class MainGUI2 extends JFrame {
     private JSplitPane buildTopArea() {
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
                 buildEditorPanel(), buildOutputPanel());
-        split.setResizeWeight(0.60);
+        split.setResizeWeight(0.54); 
         split.setDividerSize(4);
         split.setBorder(null);
         split.setBackground(bg());
-        SwingUtilities.invokeLater(() -> split.setDividerLocation(0.60));
+        SwingUtilities.invokeLater(() -> split.setDividerLocation(0.54));
         styleDivider(split);
         return split;
     }
