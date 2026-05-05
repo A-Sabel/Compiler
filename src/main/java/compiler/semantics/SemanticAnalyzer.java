@@ -1,6 +1,12 @@
 package compiler.semantics;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import compiler.parser.ast.ASTNode;
 import compiler.util.ErrorHandler;
@@ -13,12 +19,32 @@ public class SemanticAnalyzer {
     private int loopDepth = 0;
     private boolean isReachable = true;
 
+    // Track variable declarations and usage for unused variable detection
+    private static class VarInfo {
+        String type;
+        int line;
+        int column;
+
+        VarInfo(String type, int line, int column) {
+            this.type = type;
+            this.line = line;
+            this.column = column;
+        }
+    }
+
+    private final Deque<Map<String, VarInfo>> varDeclarations = new ArrayDeque<>();
+    private final Deque<Set<String>> varUsage = new ArrayDeque<>();
+
     public SemanticAnalyzer() {
         this.symbolTable = new SymbolTable();
+        // Initialize with global scope
+        varDeclarations.push(new HashMap<>());
+        varUsage.push(new HashSet<>());
     }
 
     public void analyze(ASTNode node) {
-        if (node == null) return;
+        if (node == null)
+            return;
 
         String nodeType = node.getType();
 
@@ -75,7 +101,8 @@ public class SemanticAnalyzer {
                 break;
 
             // FIX: Removed the redundant validateBinaryOperation() call path.
-            // inferExpressionType() already handles operator validation and division-by-zero
+            // inferExpressionType() already handles operator validation and
+            // division-by-zero
             // checks. Calling validateBinaryOperation() + analyzeChildren() on top caused
             // every binary-op error to be reported 2-3x. Now we just type-check the node.
             case "BINARY_OP":
@@ -115,8 +142,8 @@ public class SemanticAnalyzer {
             case "CONTINUE":
                 if (loopDepth <= 0) {
                     ErrorHandler.report(
-                        "Semantic Error: '" + nodeType.toLowerCase() + "' statement used outside of a loop.",
-                        node.getLine(), node.getColumn());
+                            "Semantic Error: '" + nodeType.toLowerCase() + "' statement used outside of a loop.",
+                            node.getLine(), node.getColumn());
                 }
                 break;
 
@@ -185,8 +212,8 @@ public class SemanticAnalyzer {
         if (collectionType != null && !collectionType.equals("type_error")
                 && !collectionType.endsWith("[]")) {
             ErrorHandler.report(
-                "Semantic Error: For-each loop requires an array, found " + collectionType + ".",
-                collectionNode.getLine(), collectionNode.getColumn());
+                    "Semantic Error: For-each loop requires an array, found " + collectionType + ".",
+                    collectionNode.getLine(), collectionNode.getColumn());
         }
 
         // Register iterator variable
@@ -195,16 +222,16 @@ public class SemanticAnalyzer {
 
             // Check iterator type matches array element type
             String expectedElemType = (collectionType != null && collectionType.endsWith("[]"))
-                ? collectionType.substring(0, collectionType.length() - 2)
-                : null;
+                    ? collectionType.substring(0, collectionType.length() - 2)
+                    : null;
 
             if (expectedElemType != null && !varDecl.getChildren().isEmpty()) {
                 String iteratorType = varDecl.getChildren().get(0).getValue(); // TYPE child
                 if (!isTypeCompatible(iteratorType, expectedElemType)) {
                     ErrorHandler.report(
-                        "Semantic Error: Incompatible types in for-each loop. Expected "
-                        + expectedElemType + " but got " + iteratorType + ".",
-                        varDecl.getLine(), varDecl.getColumn());
+                            "Semantic Error: Incompatible types in for-each loop. Expected "
+                                    + expectedElemType + " but got " + iteratorType + ".",
+                            varDecl.getLine(), varDecl.getColumn());
                 }
             }
         }
@@ -228,7 +255,7 @@ public class SemanticAnalyzer {
 
         if (children.size() < 2) {
             ErrorHandler.report("Semantic Error: Invalid variable declaration structure.",
-                node.getLine(), node.getColumn());
+                    node.getLine(), node.getColumn());
             return;
         }
 
@@ -239,8 +266,8 @@ public class SemanticAnalyzer {
 
         // Duplicate definition check
         if (symbolTable.isDeclaredInCurrentScope(name)) {
-            ErrorHandler.report("Semantic Error: Variable '" + name + "' is already defined in this scope.", 
-                                nameNode.getLine(), nameNode.getColumn());
+            ErrorHandler.report("Semantic Error: Variable '" + name + "' is already defined in this scope.",
+                    nameNode.getLine(), nameNode.getColumn());
             return;
         }
 
@@ -248,21 +275,26 @@ public class SemanticAnalyzer {
         if (children.size() >= 3) {
             ASTNode initWrapper = children.get(2);
             ASTNode initExpr = initWrapper.getChildren().isEmpty()
-                ? initWrapper
-                : initWrapper.getChildren().get(0);
+                    ? initWrapper
+                    : initWrapper.getChildren().get(0);
 
             String initType = inferExpressionType(initExpr);
 
             if (initType != null && !initType.equals("type_error")
                     && !isTypeCompatible(type, initType)) {
                 ErrorHandler.report(
-                    "Semantic Error: Type mismatch in initialization. Variable '" + name
-                    + "' is " + type + " but initialized with " + initType + ".",
-                    initExpr.getLine(), initExpr.getColumn());
+                        "Semantic Error: Type mismatch in initialization. Variable '" + name
+                                + "' is " + type + " but initialized with " + initType + ".",
+                        initExpr.getLine(), initExpr.getColumn());
             }
         }
 
         symbolTable.defineVariable(name, type);
+
+        // Track variable declaration for unused variable detection
+        if (!varDeclarations.isEmpty()) {
+            varDeclarations.peek().put(name, new VarInfo(type, nameNode.getLine(), nameNode.getColumn()));
+        }
     }
 
     // ── Method Declaration ─────────────────────────────────────────────────────
@@ -275,13 +307,19 @@ public class SemanticAnalyzer {
 
         String returnType = "void";
         ASTNode paramsNode = null;
-        ASTNode bodyNode   = null;
+        ASTNode bodyNode = null;
 
         for (ASTNode child : node.getChildren()) {
             switch (child.getType()) {
-                case "RETURN_TYPE": returnType = child.getValue(); break;
-                case "PARAMS":      paramsNode = child;            break;
-                case "BODY":        bodyNode   = child;            break;
+                case "RETURN_TYPE":
+                    returnType = child.getValue();
+                    break;
+                case "PARAMS":
+                    paramsNode = child;
+                    break;
+                case "BODY":
+                    bodyNode = child;
+                    break;
             }
         }
 
@@ -312,8 +350,8 @@ public class SemanticAnalyzer {
         if (isDuplicate) {
             // FIX: Use node.getLine()/getColumn() instead of -1,-1 for useful diagnostics.
             ErrorHandler.report(
-                "Semantic Error: Duplicate method signature for '" + methodName + "'.",
-                node.getLine(), node.getColumn());
+                    "Semantic Error: Duplicate method signature for '" + methodName + "'.",
+                    node.getLine(), node.getColumn());
         } else {
             symbolTable.defineMethod(methodName, returnType, paramTypes);
         }
@@ -322,21 +360,33 @@ public class SemanticAnalyzer {
         currentMethodReturnType = returnType;
         symbolTable.enterScope();
 
+        // Track variable declarations and usage in the method scope
+        varDeclarations.push(new HashMap<>());
+        varUsage.push(new HashSet<>());
+
         for (int i = 0; i < paramNames.size(); i++) {
             symbolTable.defineVariable(paramNames.get(i), paramTypes.get(i));
+            // Track parameters as declared variables
+            varDeclarations.peek().put(paramNames.get(i),
+                    new VarInfo(paramTypes.get(i), node.getLine(), node.getColumn()));
         }
 
         if (bodyNode != null) {
             analyze(bodyNode);
         }
 
+        // Check for unused variables in the method scope
+        checkUnusedVariables();
+
+        varUsage.pop();
+        varDeclarations.pop();
         symbolTable.exitScope();
         currentMethodReturnType = null;
 
         // Rule 10: Missing return statement check
         if (!returnType.equals("void") && !allPathsReturn(bodyNode)) {
-            ErrorHandler.report("Semantic Error: Missing return statement in method '" + methodName + "'.", 
-                                node.getLine(), node.getColumn());
+            ErrorHandler.report("Semantic Error: Missing return statement in method '" + methodName + "'.",
+                    node.getLine(), node.getColumn());
         }
     }
 
@@ -344,7 +394,7 @@ public class SemanticAnalyzer {
     private void validateReturnStatement(ASTNode node) {
         if (currentMethodReturnType == null) {
             ErrorHandler.report("Semantic Error: return statement outside of method.",
-                node.getLine(), node.getColumn());
+                    node.getLine(), node.getColumn());
             return;
         }
 
@@ -352,19 +402,19 @@ public class SemanticAnalyzer {
 
         if (currentMethodReturnType.equals("void") && hasReturnValue) {
             ErrorHandler.report("Semantic Error: void method cannot return a value.",
-                node.getLine(), node.getColumn());
+                    node.getLine(), node.getColumn());
         } else if (!currentMethodReturnType.equals("void") && !hasReturnValue) {
             ErrorHandler.report(
-                "Semantic Error: Missing return value for method expecting '"
-                + currentMethodReturnType + "'.",
-                node.getLine(), node.getColumn());
+                    "Semantic Error: Missing return value for method expecting '"
+                            + currentMethodReturnType + "'.",
+                    node.getLine(), node.getColumn());
         } else if (hasReturnValue) {
             String actualType = inferExpressionType(node.getChildren().get(0));
             if (!isTypeCompatible(currentMethodReturnType, actualType)) {
                 ErrorHandler.report(
-                    "Semantic Error: Incompatible return type. Expected '"
-                    + currentMethodReturnType + "' but got '" + actualType + "'.",
-                    node.getLine(), node.getColumn());
+                        "Semantic Error: Incompatible return type. Expected '"
+                                + currentMethodReturnType + "' but got '" + actualType + "'.",
+                        node.getLine(), node.getColumn());
             }
         }
     }
@@ -376,7 +426,8 @@ public class SemanticAnalyzer {
      */
     private void validateAssignment(ASTNode node) {
         List<ASTNode> children = node.getChildren();
-        if (children.size() < 2) return;
+        if (children.size() < 2)
+            return;
 
         ASTNode lhs = children.get(0);
         ASTNode rhs = children.get(1);
@@ -387,7 +438,7 @@ public class SemanticAnalyzer {
 
         if (lhsType.equals("ARRAY_ACCESS")) {
             // For array access, the name is in the first child (the identifier)
-            varName = lhs.getChildren().get(0).getValue(); 
+            varName = lhs.getChildren().get(0).getValue();
         } else if (lhsType.equals("IDENTIFIER") || lhsType.equals("FIELD_ACCESS")) {
             varName = lhs.getValue();
         } else {
@@ -398,14 +449,14 @@ public class SemanticAnalyzer {
         // 2. Look up the variable in the Symbol Table
         String baseVarType = symbolTable.lookupVariableType(varName);
         if (baseVarType == null) {
-            ErrorHandler.report("Semantic Error: Variable '" + varName + "' used in assignment before declaration.", 
-                                node.getLine(), node.getColumn());
+            ErrorHandler.report("Semantic Error: Variable '" + varName + "' used in assignment before declaration.",
+                    node.getLine(), node.getColumn());
             return;
         }
 
         // 3. Determine the exact expected type on the Left-Hand Side
         String expectedType = baseVarType;
-        
+
         if (lhsType.equals("ARRAY_ACCESS")) {
             // If assigning to cars[1], we expect String, not String[]
             if (baseVarType.endsWith("[]")) {
@@ -413,8 +464,8 @@ public class SemanticAnalyzer {
             }
         } else if (lhsType.equals("FIELD_ACCESS") && lhs.getValue().equals("length")) {
             // Prevent assigning to read-only .length property
-            ErrorHandler.report("Semantic Error: Cannot assign value to read-only property 'length'.", 
-                                lhs.getLine(), lhs.getColumn());
+            ErrorHandler.report("Semantic Error: Cannot assign value to read-only property 'length'.",
+                    lhs.getLine(), lhs.getColumn());
             return;
         }
 
@@ -422,7 +473,7 @@ public class SemanticAnalyzer {
         String rhsType = inferExpressionType(rhs);
         if (rhsType != null && !rhsType.equals("type_error") && !isTypeCompatible(expectedType, rhsType)) {
             ErrorHandler.report("Semantic Error: Cannot assign " + rhsType + " to " + expectedType + ".",
-                                node.getLine(), node.getColumn());
+                    node.getLine(), node.getColumn());
         }
     }
 
@@ -433,9 +484,10 @@ public class SemanticAnalyzer {
      * do NOT duplicate these checks in other methods.
      */
     private String inferExpressionType(ASTNode expr) {
-        if (expr == null) return "void";
+        if (expr == null)
+            return "void";
 
-        String type  = expr.getType();
+        String type = expr.getType();
         String value = expr.getValue();
 
         switch (type) {
@@ -447,31 +499,42 @@ public class SemanticAnalyzer {
                 return "double";
 
             case "LITERAL":
-                if (value.startsWith("\""))                      return "String";
-                if (value.startsWith("'"))                       return "char";
-                if (value.equals("true") || value.equals("false")) return "boolean";
-                if (value.equals("null"))                        return "null";
+                if (value.startsWith("\""))
+                    return "String";
+                if (value.startsWith("'"))
+                    return "char";
+                if (value.equals("true") || value.equals("false"))
+                    return "boolean";
+                if (value.equals("null"))
+                    return "null";
                 return "String";
 
             case "IDENTIFIER": {
                 String declaredType = symbolTable.lookupVariableType(value);
                 if (declaredType == null) {
                     ErrorHandler.report(
-                        "Semantic Error: Identifier '" + value + "' used before declaration.",
-                        expr.getLine(), expr.getColumn());
+                            "Semantic Error: Identifier '" + value + "' used before declaration.",
+                            expr.getLine(), expr.getColumn());
                     return "unknown";
                 }
+
+                // Track variable usage for unused variable detection
+                if (!varUsage.isEmpty()) {
+                    varUsage.peek().add(value);
+                }
+
                 return declaredType;
             }
 
             case "BINARY_OP": {
                 String op = value;
                 List<ASTNode> children = expr.getChildren();
-                if (children.size() < 2) return "unknown";
+                if (children.size() < 2)
+                    return "unknown";
 
-                ASTNode leftNode  = children.get(0);
+                ASTNode leftNode = children.get(0);
                 ASTNode rightNode = children.get(1);
-                String leftType  = inferExpressionType(leftNode);
+                String leftType = inferExpressionType(leftNode);
                 String rightType = inferExpressionType(rightNode);
 
                 // Division/modulo by literal zero
@@ -479,8 +542,8 @@ public class SemanticAnalyzer {
                         && rightNode.getType().equals("NUMBER")
                         && (rightNode.getValue().equals("0") || rightNode.getValue().equals("0.0"))) {
                     ErrorHandler.report(
-                        "Semantic Error: Arithmetic Exception: / by zero.",
-                        rightNode.getLine(), rightNode.getColumn());
+                            "Semantic Error: Arithmetic Exception: / by zero.",
+                            rightNode.getLine(), rightNode.getColumn());
                 }
 
                 if (leftType != null && rightType != null) {
@@ -499,14 +562,18 @@ public class SemanticAnalyzer {
                 if ("type_error".equals(leftType) || "type_error".equals(rightType)) {
                     return "type_error";
                 }
-                if ("double".equals(leftType) || "double".equals(rightType)) return "double";
-                if ("float".equals(leftType)  || "float".equals(rightType))  return "float";
-                if ("long".equals(leftType)   || "long".equals(rightType))   return "long";
+                if ("double".equals(leftType) || "double".equals(rightType))
+                    return "double";
+                if ("float".equals(leftType) || "float".equals(rightType))
+                    return "float";
+                if ("long".equals(leftType) || "long".equals(rightType))
+                    return "long";
                 return "int";
             }
 
             case "UNARY_OP":
-                if (value.equals("!")) return "boolean";
+                if (value.equals("!"))
+                    return "boolean";
                 if (!expr.getChildren().isEmpty()) {
                     return inferExpressionType(expr.getChildren().get(0));
                 }
@@ -524,8 +591,8 @@ public class SemanticAnalyzer {
 
                 if (possibleMethods == null || possibleMethods.isEmpty()) {
                     ErrorHandler.report(
-                        "Semantic Error: Call to undefined method '" + methodName + "'.",
-                        expr.getLine(), expr.getColumn());
+                            "Semantic Error: Call to undefined method '" + methodName + "'.",
+                            expr.getLine(), expr.getColumn());
                     return "unknown";
                 }
 
@@ -548,10 +615,10 @@ public class SemanticAnalyzer {
                     expr.setAttribute("resolved_return_type", sig.returnType);
                     if (sig.parameterTypes.size() != providedTypes.size()) {
                         ErrorHandler.report(
-                            "Semantic Error: Method '" + methodName + "' expects "
-                            + sig.parameterTypes.size() + " argument(s), but got "
-                            + providedTypes.size() + ".",
-                            expr.getLine(), expr.getColumn());
+                                "Semantic Error: Method '" + methodName + "' expects "
+                                        + sig.parameterTypes.size() + " argument(s), but got "
+                                        + providedTypes.size() + ".",
+                                expr.getLine(), expr.getColumn());
                         return sig.returnType;
                     }
                     for (int i = 0; i < providedTypes.size(); i++) {
@@ -561,9 +628,9 @@ public class SemanticAnalyzer {
                                 && !isTypeCompatible(expected, provided)) {
                             ASTNode badArg = argNodes.get(i);
                             ErrorHandler.report(
-                                "Semantic Error: Argument " + (i + 1) + " of '" + methodName
-                                + "' expects " + expected + " but got " + provided + ".",
-                                badArg.getLine(), badArg.getColumn());
+                                    "Semantic Error: Argument " + (i + 1) + " of '" + methodName
+                                            + "' expects " + expected + " but got " + provided + ".",
+                                    badArg.getLine(), badArg.getColumn());
                         }
                     }
                     return sig.returnType;
@@ -573,28 +640,33 @@ public class SemanticAnalyzer {
                 SymbolTable.MethodSignature matched = null;
                 int matchCount = 0;
                 for (SymbolTable.MethodSignature sig : possibleMethods) {
-                    if (sig.parameterTypes.size() != providedTypes.size()) continue;
+                    if (sig.parameterTypes.size() != providedTypes.size())
+                        continue;
                     boolean ok = true;
                     for (int i = 0; i < providedTypes.size(); i++) {
                         String pt = providedTypes.get(i);
                         if (pt != null && !pt.equals("unknown")
                                 && !isTypeCompatible(sig.parameterTypes.get(i), pt)) {
-                            ok = false; break;
+                            ok = false;
+                            break;
                         }
                     }
-                    if (ok) { matched = sig; matchCount++; }
+                    if (ok) {
+                        matched = sig;
+                        matchCount++;
+                    }
                 }
                 if (matchCount == 0) {
                     ErrorHandler.report(
-                        "Semantic Error: No suitable method found for '" + methodName
-                        + "' matching arguments.",
-                        expr.getLine(), expr.getColumn());
+                            "Semantic Error: No suitable method found for '" + methodName
+                                    + "' matching arguments.",
+                            expr.getLine(), expr.getColumn());
                     return "unknown";
                 }
                 if (matchCount > 1) {
                     ErrorHandler.report(
-                        "Semantic Error: Ambiguous method call for '" + methodName + "'.",
-                        expr.getLine(), expr.getColumn());
+                            "Semantic Error: Ambiguous method call for '" + methodName + "'.",
+                            expr.getLine(), expr.getColumn());
                     return "unknown";
                 }
                 if (matched == null) {
@@ -607,7 +679,8 @@ public class SemanticAnalyzer {
             case "TERNARY": {
                 // FIX: Guard against missing THEN/ELSE children from error-recovery ASTs.
                 List<ASTNode> children = expr.getChildren();
-                if (children.size() < 3) return "unknown";
+                if (children.size() < 3)
+                    return "unknown";
 
                 ASTNode thenWrapper = children.get(1);
                 ASTNode elseWrapper = children.get(2);
@@ -620,15 +693,18 @@ public class SemanticAnalyzer {
 
                 if (!isTypeCompatible(thenType, elseType) && !isTypeCompatible(elseType, thenType)) {
                     ErrorHandler.report(
-                        "Semantic Error: Incompatible ternary branches ('"
-                        + thenType + "' and '" + elseType + "').",
-                        expr.getLine(), expr.getColumn());
+                            "Semantic Error: Incompatible ternary branches ('"
+                                    + thenType + "' and '" + elseType + "').",
+                            expr.getLine(), expr.getColumn());
                     return "type_error";
                 }
 
-                if ("double".equals(thenType) || "double".equals(elseType)) return "double";
-                if ("float".equals(thenType)  || "float".equals(elseType))  return "float";
-                if ("String".equals(thenType) || "String".equals(elseType)) return "String";
+                if ("double".equals(thenType) || "double".equals(elseType))
+                    return "double";
+                if ("float".equals(thenType) || "float".equals(elseType))
+                    return "float";
+                if ("String".equals(thenType) || "String".equals(elseType))
+                    return "String";
                 return thenType;
             }
 
@@ -639,12 +715,13 @@ public class SemanticAnalyzer {
 
                 // Rule 9: Narrowing/Explicit Cast Requirement
                 boolean numericToNumeric = isNumericType(targetType) && isNumericType(actualType);
-                boolean compatible = isTypeCompatible(targetType, actualType) || isTypeCompatible(actualType, targetType);
+                boolean compatible = isTypeCompatible(targetType, actualType)
+                        || isTypeCompatible(actualType, targetType);
 
                 if (!numericToNumeric && !compatible) {
-                    ErrorHandler.report("Semantic Error: Inconvertible types; cannot cast '" + 
-                                        actualType + "' to '" + targetType + "'.", 
-                                        expr.getLine(), expr.getColumn());
+                    ErrorHandler.report("Semantic Error: Inconvertible types; cannot cast '" +
+                            actualType + "' to '" + targetType + "'.",
+                            expr.getLine(), expr.getColumn());
                     return "type_error";
                 }
                 return targetType;
@@ -659,22 +736,23 @@ public class SemanticAnalyzer {
                     if (sizeType != null && !sizeType.equals("int")
                             && !sizeType.equals("type_error")) {
                         ErrorHandler.report(
-                            "Semantic Error: Array size must be int, found " + sizeType + ".",
-                            sizeNode.getLine(), sizeNode.getColumn());
+                                "Semantic Error: Array size must be int, found " + sizeType + ".",
+                                sizeNode.getLine(), sizeNode.getColumn());
                     }
                 }
                 return value; // e.g. "int[]"
             }
 
             case "ARRAY_LITERAL": {
-                if (expr.getChildren().isEmpty()) return "Object[]";
+                if (expr.getChildren().isEmpty())
+                    return "Object[]";
                 String firstElem = inferExpressionType(expr.getChildren().get(0));
                 for (ASTNode element : expr.getChildren()) {
                     String elemType = inferExpressionType(element);
                     if (!isTypeCompatible(firstElem, elemType)) {
                         ErrorHandler.report(
-                            "Semantic Error: Inconsistent types in array literal.",
-                            element.getLine(), element.getColumn());
+                                "Semantic Error: Inconsistent types in array literal.",
+                                element.getLine(), element.getColumn());
                     }
                 }
                 return firstElem + "[]";
@@ -682,7 +760,8 @@ public class SemanticAnalyzer {
 
             case "ARRAY_ACCESS": {
                 List<ASTNode> children = expr.getChildren();
-                if (children.size() < 2) return "type_error";
+                if (children.size() < 2)
+                    return "type_error";
 
                 String arrayType = inferExpressionType(children.get(0));
                 String indexType = inferExpressionType(children.get(1));
@@ -690,22 +769,23 @@ public class SemanticAnalyzer {
                 if (indexType != null && !indexType.equals("int")
                         && !indexType.equals("type_error")) {
                     ErrorHandler.report(
-                        "Semantic Error: Array index must be int, found " + indexType + ".",
-                        expr.getLine(), expr.getColumn());
+                            "Semantic Error: Array index must be int, found " + indexType + ".",
+                            expr.getLine(), expr.getColumn());
                 }
                 if (arrayType != null && arrayType.endsWith("[]")) {
                     return arrayType.substring(0, arrayType.length() - 2);
                 }
                 if (arrayType != null && !arrayType.equals("type_error")) {
                     ErrorHandler.report(
-                        "Semantic Error: The variable is not an array type.",
-                        expr.getLine(), expr.getColumn());
+                            "Semantic Error: The variable is not an array type.",
+                            expr.getLine(), expr.getColumn());
                 }
                 return "type_error";
             }
 
             case "FIELD_ACCESS": {
-                if (expr.getChildren().isEmpty()) return "Object";
+                if (expr.getChildren().isEmpty())
+                    return "Object";
                 String receiverType = inferExpressionType(expr.getChildren().get(0));
                 String fieldName = expr.getValue();
                 // Array .length is always int
@@ -716,11 +796,13 @@ public class SemanticAnalyzer {
                 return "Object";
             }
 
-            // ASSIGN used as an expression (e.g. int x = (y = 5)) — validate and return RHS type.
+            // ASSIGN used as an expression (e.g. int x = (y = 5)) — validate and return RHS
+            // type.
             case "ASSIGN": {
                 validateAssignment(expr);
                 List<ASTNode> children = expr.getChildren();
-                if (children.size() >= 2) return inferExpressionType(children.get(1));
+                if (children.size() >= 2)
+                    return inferExpressionType(children.get(1));
                 return "unknown";
             }
 
@@ -737,7 +819,7 @@ public class SemanticAnalyzer {
      * Checks that an operator is legal for its operand types.
      */
     private void validateOperatorTypes(String op, String leftType, String rightType,
-                                       int line, int col) {
+            int line, int col) {
         switch (op) {
             case "+":
             case "-":
@@ -750,47 +832,63 @@ public class SemanticAnalyzer {
                 }
                 if (!isNumericType(leftType) || !isNumericType(rightType)) {
                     ErrorHandler.report(
-                        "Semantic Error: Operator '" + op + "' cannot be applied to '"
-                        + leftType + "' and '" + rightType + "'.", line, col);
+                            "Semantic Error: Operator '" + op + "' cannot be applied to '"
+                                    + leftType + "' and '" + rightType + "'.",
+                            line, col);
                 }
                 break;
 
-            case "<": case ">": case "<=": case ">=":
+            case "<":
+            case ">":
+            case "<=":
+            case ">=":
                 if (!isNumericType(leftType) || !isNumericType(rightType)) {
                     ErrorHandler.report(
-                        "Semantic Error: Comparison '" + op + "' requires numeric operands, got "
-                        + leftType + " and " + rightType + ".", line, col);
+                            "Semantic Error: Comparison '" + op + "' requires numeric operands, got "
+                                    + leftType + " and " + rightType + ".",
+                            line, col);
                 }
                 break;
 
-            case "==": case "!=":
+            case "==":
+            case "!=":
                 if (!isTypeCompatible(leftType, rightType)
                         && !isTypeCompatible(rightType, leftType)) {
                     ErrorHandler.report(
-                        "Semantic Error: Cannot compare " + leftType + " with "
-                        + rightType + " using '" + op + "'.", line, col);
+                            "Semantic Error: Cannot compare " + leftType + " with "
+                                    + rightType + " using '" + op + "'.",
+                            line, col);
                 }
                 break;
 
-            case "&&": case "||":
+            case "&&":
+            case "||":
                 if (!leftType.equals("boolean")) {
                     ErrorHandler.report(
-                        "Semantic Error: Operator '" + op
-                        + "' requires boolean operands, got " + leftType + ".", line, col);
+                            "Semantic Error: Operator '" + op
+                                    + "' requires boolean operands, got " + leftType + ".",
+                            line, col);
                 }
                 if (!rightType.equals("boolean")) {
                     ErrorHandler.report(
-                        "Semantic Error: Operator '" + op
-                        + "' requires boolean operands, got " + rightType + ".", line, col);
+                            "Semantic Error: Operator '" + op
+                                    + "' requires boolean operands, got " + rightType + ".",
+                            line, col);
                 }
                 break;
 
-            case "&": case "|": case "^": case "<<": case ">>": case ">>>":
+            case "&":
+            case "|":
+            case "^":
+            case "<<":
+            case ">>":
+            case ">>>":
                 if (!isIntegralType(leftType) || !isIntegralType(rightType)) {
                     ErrorHandler.report(
-                        "Semantic Error: Bitwise operator '" + op
-                        + "' requires integral operands, got "
-                        + leftType + " and " + rightType + ".", line, col);
+                            "Semantic Error: Bitwise operator '" + op
+                                    + "' requires integral operands, got "
+                                    + leftType + " and " + rightType + ".",
+                            line, col);
                 }
                 break;
         }
@@ -804,8 +902,13 @@ public class SemanticAnalyzer {
      */
     private boolean isNumericType(String type) {
         switch (type) {
-            case "int": case "double": case "float":
-            case "long": case "byte": case "short": case "char":
+            case "int":
+            case "double":
+            case "float":
+            case "long":
+            case "byte":
+            case "short":
+            case "char":
                 return true;
             default:
                 return false;
@@ -817,7 +920,11 @@ public class SemanticAnalyzer {
      */
     private boolean isIntegralType(String type) {
         switch (type) {
-            case "int": case "long": case "byte": case "short": case "char":
+            case "int":
+            case "long":
+            case "byte":
+            case "short":
+            case "char":
                 return true;
             default:
                 return false;
@@ -828,16 +935,18 @@ public class SemanticAnalyzer {
      * Returns true if actualType can be safely used where expectedType is required.
      * Handles: exact match, null assignment to reference types, numeric widening.
      * FIX: Uses "null" sentinel instead of "Object" for the null literal, so
-     *      null is compatible with reference types but not with primitives.
+     * null is compatible with reference types but not with primitives.
      */
     private boolean isTypeCompatible(String expectedType, String actualType) {
-        if (expectedType == null || actualType == null) return false;
-        if (expectedType.equals(actualType)) return true;
+        if (expectedType == null || actualType == null)
+            return false;
+        if (expectedType.equals(actualType))
+            return true;
 
         // null is compatible with any reference type (non-primitive)
         if ("null".equals(actualType)) {
             boolean isPrimitive = isNumericType(expectedType)
-                || expectedType.equals("boolean");
+                    || expectedType.equals("boolean");
             return !isPrimitive;
         }
 
@@ -848,7 +957,7 @@ public class SemanticAnalyzer {
 
         // Numeric widening: byte < short < int < long < float < double
         List<String> hierarchy = java.util.Arrays.asList(
-            "byte", "short", "int", "long", "float", "double");
+                "byte", "short", "int", "long", "float", "double");
         int ei = hierarchy.indexOf(expectedType);
         int ai = hierarchy.indexOf(actualType);
         if (ei != -1 && ai != -1) {
@@ -868,7 +977,8 @@ public class SemanticAnalyzer {
 
     /**
      * Traverses a block, enforcing dead-code detection after return/break/continue.
-     * Saves and restores isReachable so an inner block's terminal statement does not
+     * Saves and restores isReachable so an inner block's terminal statement does
+     * not
      * incorrectly mark the outer block's subsequent statements as unreachable.
      */
     private void analyzeBlock(ASTNode node) {
@@ -878,7 +988,7 @@ public class SemanticAnalyzer {
         for (ASTNode child : node.getChildren()) {
             if (!isReachable) {
                 ErrorHandler.report("Semantic Error: Unreachable statement.",
-                    child.getLine(), child.getColumn());
+                        child.getLine(), child.getColumn());
                 break; // Report only once per block
             }
             analyze(child);
@@ -894,20 +1004,44 @@ public class SemanticAnalyzer {
     }
 
     /**
+     * Checks the current scope for declared variables that were never used.
+     * Emits warnings via ErrorHandler for each unused variable.
+     */
+    private void checkUnusedVariables() {
+        if (varDeclarations.isEmpty() || varUsage.isEmpty()) {
+            return;
+        }
+
+        Map<String, VarInfo> declarations = varDeclarations.peek();
+        Set<String> used = varUsage.peek();
+
+        for (Map.Entry<String, VarInfo> entry : declarations.entrySet()) {
+            String varName = entry.getKey();
+            if (!used.contains(varName)) {
+                VarInfo info = entry.getValue();
+                ErrorHandler.report(
+                        "Warning: Variable '" + varName + "' is declared but never used.",
+                        info.line, info.column);
+            }
+        }
+    }
+
+    /**
      * Enforces that IF/WHILE/FOR conditions evaluate to boolean.
      * FIX: Now uses the CONDITION node's own coordinates instead of -1, -1.
      */
     private void validateBooleanCondition(ASTNode loopOrIfNode) {
         for (ASTNode child : loopOrIfNode.getChildren()) {
             if (child.getType().equals("CONDITION")) {
-                if (child.getChildren().isEmpty()) break;
+                if (child.getChildren().isEmpty())
+                    break;
                 ASTNode expression = child.getChildren().get(0);
                 String condType = inferExpressionType(expression);
                 if (!"boolean".equals(condType) && !"unknown".equals(condType)
                         && !"type_error".equals(condType)) {
                     ErrorHandler.report(
-                        "Semantic Error: Condition must be boolean, found " + condType + ".",
-                        child.getLine(), child.getColumn()); // FIX: real coordinates
+                            "Semantic Error: Condition must be boolean, found " + condType + ".",
+                            child.getLine(), child.getColumn()); // FIX: real coordinates
                 }
                 break;
             }
@@ -915,26 +1049,32 @@ public class SemanticAnalyzer {
     }
 
     private boolean allPathsReturn(ASTNode node) {
-    if (node == null) return false;
-    String type = node.getType();
-
-    switch (type) {
-        case "RETURN": return true;
-        case "BLOCK":
-        case "BODY":
-            for (ASTNode child : node.getChildren()) {
-                if (allPathsReturn(child)) return true;
-            }
+        if (node == null)
             return false;
-        case "IF_STMT":
-            // Both branches must return for the IF to guarantee a return
-            ASTNode thenBranch = null, elseBranch = null;
-            for (ASTNode child : node.getChildren()) {
-                if (child.getType().equals("THEN")) thenBranch = child;
-                if (child.getType().equals("ELSE")) elseBranch = child;
-            }
-            return allPathsReturn(thenBranch) && allPathsReturn(elseBranch);
-        default: return false;
+        String type = node.getType();
+
+        switch (type) {
+            case "RETURN":
+                return true;
+            case "BLOCK":
+            case "BODY":
+                for (ASTNode child : node.getChildren()) {
+                    if (allPathsReturn(child))
+                        return true;
+                }
+                return false;
+            case "IF_STMT":
+                // Both branches must return for the IF to guarantee a return
+                ASTNode thenBranch = null, elseBranch = null;
+                for (ASTNode child : node.getChildren()) {
+                    if (child.getType().equals("THEN"))
+                        thenBranch = child;
+                    if (child.getType().equals("ELSE"))
+                        elseBranch = child;
+                }
+                return allPathsReturn(thenBranch) && allPathsReturn(elseBranch);
+            default:
+                return false;
+        }
     }
-}
 }

@@ -1,0 +1,12 @@
+class UnusedVarTest {
+    void testUnused() {
+        int ghostVar = 100;
+        int usedVar = 50;
+        println(usedVar);
+    }
+    
+    void testAllUnused() {
+        int x = 1;
+        int y = 2;
+    }
+}

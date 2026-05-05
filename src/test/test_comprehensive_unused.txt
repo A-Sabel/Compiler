@@ -1,0 +1,15 @@
+class ComprehensiveTest {
+    void methodWithMixedVariables(int paramUsed, int paramUnused) {
+        int usedVar = 10;
+        int unusedVar = 20;
+        int usedInExpression = usedVar + paramUsed;
+        println(usedInExpression);
+    }
+    
+    void anotherMethod() {
+        int x = 1;
+        int y = 2;
+        int z = x + y;
+        println(z);
+    }
+}

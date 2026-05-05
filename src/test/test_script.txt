@@ -79,3 +79,29 @@ class Demo {
         println("Done!");
     }
 }
+
+class ArraySumTest {
+    void main() {
+        // Allocate array of size 5
+        int[] numbers = new int[5]; 
+        
+        // Store values (IASTORE)
+        numbers[0] = 10;
+        numbers[1] = 20;
+        numbers[2] = 30;
+        numbers[3] = 40;
+        numbers[4] = 50;
+
+        int sum = 0;
+        int i = 0;
+
+        // Load values (IALOAD)
+        while (i < 5) {
+            sum = sum + numbers[i];
+            println("Added " + numbers[i] + ", current sum: " + sum);
+            i = i + 1;
+        }
+
+        println("Total Array Sum: " + sum);
+    }
+}

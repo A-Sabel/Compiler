@@ -1,0 +1,7 @@
+class SimpleTest {
+    void test() {
+        int unused = 5;
+        int used = 10;
+        println(used);
+    }
+}
