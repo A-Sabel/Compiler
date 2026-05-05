@@ -1975,13 +1975,13 @@ public class MainGUI2 extends JFrame {
         }));
 
         content.add(Box.createVerticalStrut(20));
-        JLabel fontTitle = new JLabel("Font Size (0 - 15)");
+    JLabel fontTitle = new JLabel("Font Size (1 - 25)");
         fontTitle.setFont(FONT_UI_B);
         fontTitle.setForeground(labelFg());
         content.add(fontTitle);
         content.add(Box.createVerticalStrut(10));
 
-        JSlider fontSlider = new JSlider(0, 15, currentFontSize);
+    JSlider fontSlider = new JSlider(1, 25, currentFontSize);
         fontSlider.setOpaque(false);
         fontSlider.setMajorTickSpacing(5);
         fontSlider.setMinorTickSpacing(1);
