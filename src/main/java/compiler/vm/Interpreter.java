@@ -169,7 +169,7 @@ public class Interpreter {
                     }
 
                     case INTERN_STRING: {
-                        constPool.put(Integer.parseInt(instr.getResult()), instr.getArg1());
+                        constPool.put(Integer.parseInt(instr.getResult()), unescape(instr.getArg1()));
                         break;
                     }
 
@@ -362,8 +362,29 @@ public class Interpreter {
                         context.returned = true;
                         return;
 
-                    case CONVERT:
-                    case FOLDED_CONST:
+                    case THROW: {
+                        Object exObj = resolveValue(instr.getArg1(), context);
+                        throw new VmException(exObj);
+                    }
+
+                    case CONVERT: {
+                        Object srcVal = resolveValue(instr.getArg1(), context);
+                        Number n = toNumber(srcVal);
+                        String mnemonic = instr.getOp();
+                        Object converted = n;
+                        if (mnemonic != null) {
+                            if (mnemonic.endsWith("2I")) converted = n.intValue();
+                            else if (mnemonic.endsWith("2D")) converted = n.doubleValue();
+                            else if (mnemonic.endsWith("2F")) converted = n.floatValue();
+                            else if (mnemonic.endsWith("2J")) converted = n.longValue();
+                        }
+                        context.temps.put(instr.getResult(), converted);
+                        break;
+                    }
+                    case FOLDED_CONST: {
+                        context.temps.put(instr.getResult(), parseLiteral(instr.getArg1()));
+                        break;
+                    }
                     case DUP:
                     case DEFAULT_CONSTRUCTOR:
                     case STATIC_INIT:
@@ -373,10 +394,20 @@ public class Interpreter {
                     default:
                         break;
                 }
+            } catch (VmException ex) {
+                Integer handlerIndex = findExceptionHandler(pc);
+                if (handlerIndex != null) {
+                    pc = handlerIndex;
+                    context.temps.put("exception", ex.exceptionObject);
+                    continue;
+                }
+                throw new RuntimeException("Unhandled Exception: " + ex.exceptionObject);
             } catch (RuntimeException ex) {
                 Integer handlerIndex = findExceptionHandler(pc);
                 if (handlerIndex != null) {
                     pc = handlerIndex;
+                    RuntimeObject errObj = new RuntimeObject("java/lang/Exception");
+                    context.temps.put("exception", errObj);
                     continue;
                 }
                 throw ex;
@@ -590,7 +621,7 @@ public class Interpreter {
         if ("false".equals(name))
             return false;
         if (name.startsWith("\"") && name.endsWith("\""))
-            return name.substring(1, name.length() - 1);
+            return unescape(name.substring(1, name.length() - 1));
         try {
             if (name.contains("."))
                 return Double.parseDouble(name);
@@ -636,7 +667,7 @@ public class Interpreter {
         if ("false".equals(value))
             return false;
         if (value.startsWith("\"") && value.endsWith("\""))
-            return value.substring(1, value.length() - 1);
+            return unescape(value.substring(1, value.length() - 1));
         try {
             if (value.contains("."))
                 return Double.parseDouble(value);
@@ -644,6 +675,30 @@ public class Interpreter {
         } catch (NumberFormatException ex) {
             return value;
         }
+    }
+
+    private String unescape(String s) {
+        if (s == null) return null;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' && i + 1 < s.length()) {
+                char next = s.charAt(i + 1);
+                switch (next) {
+                    case 'n': sb.append('\n'); break;
+                    case 't': sb.append('\t'); break;
+                    case 'r': sb.append('\r'); break;
+                    case '"': sb.append('\"'); break;
+                    case '\'': sb.append('\''); break;
+                    case '\\': sb.append('\\'); break;
+                    default: sb.append('\\').append(next); break;
+                }
+                i++;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     private int parseArgCount(String raw) {
@@ -708,6 +763,14 @@ public class Interpreter {
             this.end = end;
             this.handler = handler;
             this.catchType = catchType;
+        }
+    }
+
+    private static final class VmException extends RuntimeException {
+        final Object exceptionObject;
+        VmException(Object exceptionObject) {
+            super(exceptionObject != null ? exceptionObject.toString() : "null");
+            this.exceptionObject = exceptionObject;
         }
     }
 

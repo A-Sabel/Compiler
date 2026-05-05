@@ -548,7 +548,11 @@ public class Parser {
             if (check("KEYWORD", "case")) {
                 advance(); // consume 'case'
                 ASTNode caseExpr = parseExpression();
-                consume("PUNCTUATION", ":");
+                if (currentLexeme().equals(":")) {
+                    advance();
+                } else {
+                    consume("PUNCTUATION", ":");
+                }
 
                 ASTNode caseNode = ASTNode.of("CASE");
                 caseNode.addChild(caseExpr);
@@ -563,7 +567,11 @@ public class Parser {
                 casesWrapper.addChild(caseNode);
             } else if (check("KEYWORD", "default")) {
                 advance(); // consume 'default'
-                consume("PUNCTUATION", ":");
+                if (currentLexeme().equals(":")) {
+                    advance();
+                } else {
+                    consume("PUNCTUATION", ":");
+                }
                 ASTNode defaultNode = ASTNode.of("DEFAULT");
                 ASTNode defaultBody = ASTNode.of("CASE_BODY");
                 while (!isAtEnd() && !check("SPECIAL_CHAR", "}")) {

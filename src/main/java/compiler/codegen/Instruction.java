@@ -54,6 +54,7 @@ public final class Instruction {
         CALL_VIRTUAL_DESC, // result = callvirtual <obj> <name> <descriptor> <argCount>
         RETURN, // return
         RETURN_VALUE, // return <value>
+        THROW, // throw <obj>
 
         // ── TAC objects ───────────────────────────────────────────────────────
         NEW, // result = new <type>(<argCount args already emitted as ARG)
@@ -215,6 +216,10 @@ public final class Instruction {
 
     public static Instruction retValue(String value) {
         return new Instruction(Opcode.RETURN_VALUE, null, value, null, null);
+    }
+
+    public static Instruction throwException(String exObj) {
+        return new Instruction(Opcode.THROW, null, exObj, null, null);
     }
 
     public static Instruction newObj(String result, String type, int argCount) {
@@ -435,6 +440,8 @@ public final class Instruction {
                 return "return";
             case RETURN_VALUE:
                 return "return " + arg1;
+            case THROW:
+                return "throw " + arg1;
             case NEW:
                 return result + " = new " + arg1 + "(" + op + " args)";
             case NEW_ARRAY:

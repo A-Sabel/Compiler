@@ -151,6 +151,17 @@ public class SemanticAnalyzer {
             case "FOR":
                 symbolTable.enterScope();
                 loopDepth++;
+                validateBooleanCondition(node);
+                for (ASTNode child : node.getChildren()) {
+                    if (child.getType().equals("UPDATE") && !child.getChildren().isEmpty()) {
+                        ASTNode updateList = child.getChildren().get(0);
+                        if (updateList.getType().equals("UPDATE_LIST")) {
+                            for (ASTNode expr : updateList.getChildren()) {
+                                inferExpressionType(expr);
+                            }
+                        }
+                    }
+                }
                 analyzeChildren(node);
                 loopDepth--;
                 symbolTable.exitScope();
@@ -170,10 +181,7 @@ public class SemanticAnalyzer {
                 break;
 
             case "SWITCH":
-                // Increment loopDepth so 'break' inside switch is considered legal.
-                loopDepth++;
-                analyzeChildren(node);
-                loopDepth--;
+                analyzeSwitchStatement(node);
                 break;
 
             case "PRINT_STMT":
@@ -235,12 +243,92 @@ public class SemanticAnalyzer {
                 if (!varDeclarations.isEmpty()) {
                     varDeclarations.peek().put(name, new VarInfo(type, c.getLine(), c.getColumn()));
                 }
+
+                if (isOverbroadExceptionType(type)) {
+                    ErrorHandler.report(
+                            "Warning: Catching broad exception type '" + type + "' may hide bugs.",
+                            c.getLine(), c.getColumn());
+                }
+            }
+
+            if (isEmptyCatchBody(catchBody)) {
+                ErrorHandler.report(
+                        "Warning: Empty catch block. Consider handling or rethrowing the exception.",
+                        c.getLine(), c.getColumn());
             }
 
             if (catchBody != null) {
                 analyze(catchBody);
             }
             symbolTable.exitScope();
+        }
+    }
+
+    private void analyzeSwitchStatement(ASTNode node) {
+        loopDepth++;
+
+        ASTNode casesWrapper = null;
+        for (ASTNode child : node.getChildren()) {
+            if (child.getType().equals("EXPR") && !child.getChildren().isEmpty()) {
+                inferExpressionType(child.getChildren().get(0));
+            } else if (child.getType().equals("CASES")) {
+                casesWrapper = child;
+                for (ASTNode c : child.getChildren()) {
+                    if (c.getType().equals("CASE") && !c.getChildren().isEmpty()) {
+                        inferExpressionType(c.getChildren().get(0));
+                    }
+                }
+            }
+        }
+
+        analyzeChildren(node);
+
+        if (casesWrapper != null) {
+            warnAboutSwitchFallthrough(casesWrapper);
+        }
+
+        loopDepth--;
+    }
+
+    private void warnAboutSwitchFallthrough(ASTNode casesWrapper) {
+        List<ASTNode> cases = casesWrapper.getChildren();
+        for (int i = 0; i < cases.size(); i++) {
+            ASTNode current = cases.get(i);
+            if (!("CASE".equals(current.getType()) || "DEFAULT".equals(current.getType()))) {
+                continue;
+            }
+
+            ASTNode body = null;
+            for (ASTNode child : current.getChildren()) {
+                if ("CASE_BODY".equals(child.getType())) {
+                    body = child;
+                    break;
+                }
+            }
+
+            if (body == null || body.getChildren().isEmpty()) {
+                continue;
+            }
+
+            ASTNode lastStmt = body.getChildren().get(body.getChildren().size() - 1);
+            if (isFallthroughTerminator(lastStmt)) {
+                continue;
+            }
+
+            boolean hasNextBranch = false;
+            for (int j = i + 1; j < cases.size(); j++) {
+                ASTNode next = cases.get(j);
+                if ("CASE".equals(next.getType()) || "DEFAULT".equals(next.getType())) {
+                    hasNextBranch = true;
+                    break;
+                }
+            }
+
+            if (hasNextBranch) {
+                ErrorHandler.report(
+                        "Warning: Possible switch fallthrough. Add break, return, or throw if intentional.",
+                        lastStmt.getLine(), lastStmt.getColumn());
+            }
         }
     }
 
@@ -589,6 +677,13 @@ public class SemanticAnalyzer {
 
         // 4. Validate RHS compatibility
         String rhsType = inferExpressionType(rhs);
+
+        if (isSelfAssignment(lhs, rhs)) {
+            ErrorHandler.report(
+                    "Warning: Self-assignment has no effect.",
+                    node.getLine(), node.getColumn());
+        }
+
         if (rhsType != null && !rhsType.equals("type_error") && !isTypeCompatible(expectedType, rhsType)) {
             ErrorHandler.report("Semantic Error: Cannot assign " + rhsType + " to " + expectedType + ".",
                     node.getLine(), node.getColumn());
@@ -655,6 +750,28 @@ public class SemanticAnalyzer {
                 String leftType = inferExpressionType(leftNode);
                 String rightType = inferExpressionType(rightNode);
 
+                if ((op.equals("==") || op.equals("!="))
+                        && (isBooleanLiteralNode(leftNode) || isBooleanLiteralNode(rightNode))) {
+                    if (expr.getAttribute("warned_bool_literal_compare") == null) {
+                        expr.setAttribute("warned_bool_literal_compare", "true");
+                        ErrorHandler.report(
+                                "Warning: Comparison with a boolean literal may be redundant.",
+                                getFallbackLine(expr, leftNode, rightNode),
+                                getFallbackColumn(expr, leftNode, rightNode));
+                    }
+                }
+
+                if ((op.equals("==") || op.equals("!="))
+                        && (isNullLiteralNode(leftNode) || isNullLiteralNode(rightNode))) {
+                    if (expr.getAttribute("warned_null_compare") == null) {
+                        expr.setAttribute("warned_null_compare", "true");
+                        ErrorHandler.report(
+                                "Warning: Null comparison should be deliberate; consider an explicit null check.",
+                                getFallbackLine(expr, leftNode, rightNode),
+                                getFallbackColumn(expr, leftNode, rightNode));
+                    }
+                }
+
                 // Division/modulo by literal zero
                 if ((op.equals("/") || op.equals("%"))
                         && rightNode.getType().equals("NUMBER")
@@ -664,8 +781,18 @@ public class SemanticAnalyzer {
                             rightNode.getLine(), rightNode.getColumn());
                 }
 
+                if ((op.equals("==") || op.equals("!=")) && isSameExpression(leftNode, rightNode)
+                        && expr.getAttribute("warned_self_compare") == null) {
+                    expr.setAttribute("warned_self_compare", "true");
+                    ErrorHandler.report(
+                            "Warning: Comparing an expression with itself is usually redundant.",
+                            getFallbackLine(expr, leftNode, rightNode),
+                            getFallbackColumn(expr, leftNode, rightNode));
+                }
+
                 if (leftType != null && rightType != null) {
-                    validateOperatorTypes(op, leftType, rightType, expr.getLine(), expr.getColumn());
+                    validateOperatorTypes(op, leftType, rightType, leftNode, rightNode,
+                            expr.getLine(), expr.getColumn());
                 }
 
                 // Determine result type
@@ -692,6 +819,11 @@ public class SemanticAnalyzer {
             case "UNARY_OP":
                 if (value.equals("!"))
                     return "boolean";
+                if (value.equals("++") || value.equals("--")) {
+                    if (!expr.getChildren().isEmpty()) {
+                        validateLValue(expr.getChildren().get(0), value);
+                    }
+                }
                 if (!expr.getChildren().isEmpty()) {
                     return inferExpressionType(expr.getChildren().get(0));
                 }
@@ -699,6 +831,7 @@ public class SemanticAnalyzer {
 
             case "POSTFIX_OP":
                 if (!expr.getChildren().isEmpty()) {
+                    validateLValue(expr.getChildren().get(0), value);
                     return inferExpressionType(expr.getChildren().get(0));
                 }
                 return "int";
@@ -845,6 +978,13 @@ public class SemanticAnalyzer {
                 return targetType;
 
             case "NEW":
+                for (ASTNode child : expr.getChildren()) {
+                    if (child.getType().equals("ARGS")) {
+                        for (ASTNode arg : child.getChildren()) {
+                            inferExpressionType(arg);
+                        }
+                    }
+                }
                 return value; // class name
 
             case "NEW_ARRAY": {
@@ -932,12 +1072,23 @@ public class SemanticAnalyzer {
         }
     }
 
+    // ── L-Value Validation ─────────────────────────────────────────────────────
+    private void validateLValue(ASTNode node, String op) {
+        if (node == null)
+            return;
+        String type = node.getType();
+        if (!type.equals("IDENTIFIER") && !type.equals("ARRAY_ACCESS") && !type.equals("FIELD_ACCESS")) {
+            ErrorHandler.report("Semantic Error: Invalid target for operator '" + op + "'. Variable expected.",
+                    node.getLine(), node.getColumn());
+        }
+    }
+
     // ── Operator Validation ────────────────────────────────────────────────────
     /**
      * Checks that an operator is legal for its operand types.
      */
     private void validateOperatorTypes(String op, String leftType, String rightType,
-            int line, int col) {
+            ASTNode leftNode, ASTNode rightNode, int line, int col) {
         switch (op) {
             case "+":
             case "-":
@@ -1164,6 +1315,12 @@ public class SemanticAnalyzer {
                             expression.getLine(), expression.getColumn());
                 }
 
+                if (isConstantCondition(expression)) {
+                    ErrorHandler.report(
+                            "Warning: Condition is constant and may make the branch or loop unnecessary.",
+                            expression.getLine(), expression.getColumn());
+                }
+
                 String condType = inferExpressionType(expression);
                 if (!"boolean".equals(condType) && !"unknown".equals(condType)
                         && !"type_error".equals(condType)) {
@@ -1232,5 +1389,150 @@ public class SemanticAnalyzer {
         }
 
         return false;
+    }
+
+    private boolean isConstantCondition(ASTNode expr) {
+        if (expr == null) {
+            return false;
+        }
+
+        String type = expr.getType();
+        String value = expr.getValue();
+
+        if ("LITERAL".equals(type) || "BOOLEAN_LITERAL".equals(type)) {
+            return "true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value)
+                    || value != null && value.matches("-?\\d+(\\.\\d+)?");
+        }
+
+        if ("UNARY_OP".equals(type) || "BINARY_OP".equals(type)) {
+            return expr.getChildren().stream().allMatch(this::isConstantCondition);
+        }
+
+        return false;
+    }
+
+    private boolean isOverbroadExceptionType(String type) {
+        return "Exception".equals(type) || "Throwable".equals(type) || "RuntimeException".equals(type);
+    }
+
+    private boolean isEmptyCatchBody(ASTNode catchBody) {
+        if (catchBody == null) {
+            return true;
+        }
+
+        if (catchBody.getChildren().isEmpty()) {
+            return true;
+        }
+
+        ASTNode inner = catchBody.getChildren().get(0);
+        if (inner == null) {
+            return true;
+        }
+
+        if ("BLOCK".equals(inner.getType()) || "BODY".equals(inner.getType())) {
+            return inner.getChildren().isEmpty();
+        }
+
+        return false;
+    }
+
+    private boolean isBooleanLiteralNode(ASTNode node) {
+        if (node == null) {
+            return false;
+        }
+
+        String type = node.getType();
+        String value = node.getValue();
+        return ("LITERAL".equals(type) || "BOOLEAN_LITERAL".equals(type))
+                && ("true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value));
+    }
+
+    private boolean isNullLiteralNode(ASTNode node) {
+        if (node == null) {
+            return false;
+        }
+
+        String type = node.getType();
+        String value = node.getValue();
+        return ("LITERAL".equals(type) || "NULL_LITERAL".equals(type))
+                && "null".equalsIgnoreCase(value);
+    }
+
+    private boolean isSelfAssignment(ASTNode lhs, ASTNode rhs) {
+        if (lhs == null || rhs == null) {
+            return false;
+        }
+
+        if (!"IDENTIFIER".equals(lhs.getType()) || !"IDENTIFIER".equals(rhs.getType())) {
+            return false;
+        }
+
+        return lhs.getValue() != null && lhs.getValue().equals(rhs.getValue());
+    }
+
+    private boolean isSameExpression(ASTNode leftNode, ASTNode rightNode) {
+        if (leftNode == null || rightNode == null) {
+            return false;
+        }
+
+        if (!leftNode.getType().equals(rightNode.getType())) {
+            return false;
+        }
+
+        String leftValue = leftNode.getValue();
+        String rightValue = rightNode.getValue();
+        if (leftValue == null ? rightValue != null : !leftValue.equals(rightValue)) {
+            return false;
+        }
+
+        List<ASTNode> leftChildren = leftNode.getChildren();
+        List<ASTNode> rightChildren = rightNode.getChildren();
+        if (leftChildren.size() != rightChildren.size()) {
+            return false;
+        }
+
+        for (int i = 0; i < leftChildren.size(); i++) {
+            if (!isSameExpression(leftChildren.get(i), rightChildren.get(i))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private boolean isFallthroughTerminator(ASTNode stmt) {
+        if (stmt == null) {
+            return false;
+        }
+
+        String type = stmt.getType();
+        return "BREAK".equals(type) || "RETURN".equals(type) || "THROW".equals(type)
+                || "CONTINUE".equals(type);
+    }
+
+    private int getFallbackLine(ASTNode expr, ASTNode leftNode, ASTNode rightNode) {
+        if (expr != null && expr.getLine() > 0) {
+            return expr.getLine();
+        }
+        if (leftNode != null && leftNode.getLine() > 0) {
+            return leftNode.getLine();
+        }
+        if (rightNode != null && rightNode.getLine() > 0) {
+            return rightNode.getLine();
+        }
+        return -1;
+    }
+
+    private int getFallbackColumn(ASTNode expr, ASTNode leftNode, ASTNode rightNode) {
+        if (expr != null && expr.getColumn() > 0) {
+            return expr.getColumn();
+        }
+        if (leftNode != null && leftNode.getColumn() > 0) {
+            return leftNode.getColumn();
+        }
+        if (rightNode != null && rightNode.getColumn() > 0) {
+            return rightNode.getColumn();
+        }
+        return -1;
     }
 }

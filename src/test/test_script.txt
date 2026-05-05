@@ -1,0 +1,241 @@
+// ============================================================================
+// SabelJ Compiler - 20 Standalone Test Cases
+// INSTRUCTIONS: Copy any individual test block into the editor and hit Run.
+// Each test is now a fully self-contained program with its own main() method!
+// ============================================================================
+
+// --- 1. Basic I/O and Strings ---
+void main() {
+    System.out.println("\n--- 1. Hello World ---");
+    String msg = "Welcome to Compiler!";
+    System.out.println(msg);
+}
+
+/* -------------------------------------------------------------------------
+// --- 2. Arithmetic & Precedence ---
+void main() {
+    System.out.println("\n--- 2. Arithmetic ---");
+    int a = 10 + 5 * 2;   // Should be 20
+    int b = (10 + 5) * 2; // Should be 30
+    System.out.println("a = " + a + ", b = " + b);
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 3. Variable Scoping & Shadowing ---
+void main() {
+    System.out.println("\n--- 3. Scoping ---");
+    int x = 100;
+    {
+        int x = 200; // Semantic Warning: Shadows outer variable
+        System.out.println("Inner x = " + x);
+    }
+    System.out.println("Outer x = " + x);
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 4. Control Flow: If/Else ---
+void main() {
+    System.out.println("\n--- 4. If/Else ---");
+    int score = 85;
+    if (score >= 90) {
+        System.out.println("Grade: A");
+    } else if (score >= 80) {
+        System.out.println("Grade: B");
+    } else {
+        System.out.println("Grade: C");
+    }
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 5. Control Flow: While Loop ---
+void main() {
+    System.out.println("\n--- 5. While Loop ---");
+    int count = 3;
+    while (count > 0) {
+        System.out.println("Count: " + count);
+        count--;
+    }
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 6. Control Flow: For Loop ---
+void main() {
+    System.out.println("\n--- 6. For Loop ---");
+    for (int i = 1; i <= 3; i++) {
+        System.out.println("For iteration: " + i);
+    }
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 7. Control Flow: Do-While ---
+void main() {
+    System.out.println("\n--- 7. Do-While ---");
+    int k = 1;
+    do {
+        System.out.println("Do-while: " + k);
+        k++;
+    } while (k <= 2);
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 8. Control Flow: Switch Statement ---
+void main() {
+    System.out.println("\n--- 8. Switch ---");
+    int day = 1;
+    switch (day) {
+        case 1: System.out.println("Monday"); break;
+        case 2: System.out.println("Tuesday"); break;
+        default: System.out.println("Other day");
+    }
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 9. Methods & Return Values ---
+int testMethods(int a, int b) {
+    return a * b + 5;
+}
+
+void main() {
+    System.out.println("\n--- 9. Methods ---");
+    System.out.println("Methods result: " + testMethods(5, 5));
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 10. Recursion ---
+int factorial(int n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
+}
+
+void main() {
+    System.out.println("\n--- 10. Recursion ---");
+    System.out.println("Factorial of 5 is: " + factorial(5));
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 11. Ternary Operator ---
+void main() {
+    System.out.println("\n--- 11. Ternary Operator ---");
+    int age = 20;
+    String status = (age >= 18) ? "Adult" : "Minor";
+    System.out.println("Status: " + status);
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 12. Arrays (1D) ---
+void main() {
+    System.out.println("\n--- 12. Arrays ---");
+    int[] arr = new int[3];
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[2] = 30;
+    System.out.println("Array[1]: " + arr[1]);
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 13. Exception Handling: Try-Catch ---
+void main() {
+    System.out.println("\n--- 13. Try-Catch ---");
+    try {
+        throw new Exception("Test Exception");
+    } catch (Exception e) {
+        System.out.println("Caught an exception!");
+    }
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 14. Exception Handling: Throws ---
+void helperThrows() throws Exception {
+    throw new Exception("Thrown from helper");
+}
+
+void main() {
+    System.out.println("\n--- 14. Throws ---");
+    try { 
+        helperThrows(); 
+    } catch (Exception e) { 
+        System.out.println("Handled thrown exception! " + e); 
+    }
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 15. Type Casting ---
+void main() {
+    System.out.println("\n--- 15. Type Casting ---");
+    double pi = 3.14159;
+    int truncPi = (int) pi;
+    System.out.println("Double: " + pi + " -> Int: " + truncPi);
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 16. Logical Short-Circuiting ---
+void main() {
+    System.out.println("\n--- 16. Short-Circuiting ---");
+    boolean safe = false;
+    int zero = 0;
+    if (safe && (10 / zero == 1)) {
+        System.out.println("Will not print");
+    } else {
+        System.out.println("Short-circuit prevented a / by zero crash!");
+    }
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 17. String Concatenation ---
+void main() {
+    System.out.println("\n--- 17. String Concatenation ---");
+    int year = 2026;
+    String event = "Compiler v1.0";
+    System.out.println("Event: " + event + " in " + year);
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 18. Unused Variables (Semantic Warnings) ---
+void main() {
+    System.out.println("\n--- 18. Unused Variables ---");
+    int used = 10;
+    int unused = 999; // Note: Check your 'Warnings' tab to see this caught!
+    System.out.println("Used var: " + used);
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 19. Dead Code Detection (Semantic Errors) ---
+void main() {
+    System.out.println("\n--- 19. Dead Code Detection ---");
+    return;
+    // int zombie = 404; // UNCOMMENT ME to see the "Unreachable Statement" Semantic Error!
+}
+------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 20. Compiler Optimizations ---
+void main() {
+    System.out.println("\n--- 20. Optimizations ---");
+    
+    // Constant Folding: The compiler will pre-calculate this to 86400
+    int secondsInDay = 60 * 60 * 24; 
+    
+    // Strength Reduction: The compiler changes 'x * 4' into a bitwise shift 'x << 2'
+    int x = 10;
+    int fastMul = x * 4; 
+    
+    System.out.println("Seconds: " + secondsInDay + ", FastMul: " + fastMul);
+}
+------------------------------------------------------------------------- */

@@ -1908,7 +1908,17 @@ public class MainGUI2 extends JFrame {
                 long durationMs = (System.nanoTime() - startTime) / 1_000_000;
                 String timeStr = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
 
-                if (compileResult.errors.isEmpty()) {
+                int localErrors = 0, localWarnings = 0;
+                for (String err : compileResult.errors) {
+                    if (err.toLowerCase().contains("warning"))
+                        localWarnings++;
+                    else
+                        localErrors++;
+                }
+                final int finalErrors = localErrors;
+                final int finalWarnings = localWarnings;
+
+                if (finalErrors == 0) {
                     ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                     PrintStream originalOut = System.out;
                     PrintStream originalErr = System.err;
@@ -1932,8 +1942,26 @@ public class MainGUI2 extends JFrame {
                     final long finalMs = durationMs;
 
                     SwingUtilities.invokeLater(() -> {
+                        errorCount = finalErrors;
+                        warnCount = finalWarnings;
+
+                        for (String err : compileResult.errors) {
+                            String timestamped = "[" + timeStr + "] " + err;
+                            if (err.toLowerCase().contains("warning")) {
+                                warningListModel.addElement(timestamped);
+                            } else {
+                                errorListModel.addElement(timestamped);
+                            }
+                        }
+                        updateConsoleCounts();
+
                         appendConsole("\u2713 [" + timeStr + "] Compilation successful (" + finalMs + "ms)",
                                 SUCCESS_GREEN);
+
+                        if (warnCount > 0) {
+                            appendConsole("\u26A0 [" + timeStr + "] Compiled with " + warnCount + " warning(s).",
+                                    WARNING_YELLOW);
+                        }
 
                         for (compiler.lexer.models.Tokens t : compileResult.tokens) {
                             String category = t.getClass().getSimpleName().toLowerCase();
@@ -1963,17 +1991,6 @@ public class MainGUI2 extends JFrame {
                     });
 
                 } else {
-                    // Capture counts locally on the background thread; apply on EDT
-                    int localErrors = 0, localWarnings = 0;
-                    for (String err : compileResult.errors) {
-                        if (err.toLowerCase().contains("warning"))
-                            localWarnings++;
-                        else
-                            localErrors++;
-                    }
-                    final int finalErrors = localErrors;
-                    final int finalWarnings = localWarnings;
-
                     SwingUtilities.invokeLater(() -> {
                         // FIX (thread safety): errorCount/warnCount written only on EDT
                         errorCount = finalErrors;

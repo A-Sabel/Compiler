@@ -1,0 +1,60 @@
+class AllWarningsTest {
+    void shadowAndUnused() {
+        int outer = 10;
+        {
+            int outer = 20;
+            println(outer);
+        }
+
+        int unusedVar = 99;
+        int usedVar = 5;
+        println(usedVar);
+
+        usedVar = usedVar;
+        boolean ready = true;
+        if (ready == true) {
+            println(usedVar);
+        }
+        int selfCompare = 2;
+        if (selfCompare == selfCompare) {
+            println(usedVar);
+        }
+        String maybeNull = null;
+        if (maybeNull == null) {
+            println(maybeNull);
+        }
+        if (true) {
+            println(usedVar);
+        }
+        5 + usedVar;
+    }
+
+    void conditionAndSwitch() {
+        boolean flag = true;
+        if (flag = false) {
+            println(flag);
+        }
+
+        try {
+            int safe = 1;
+        } catch (Exception e) {
+        }
+
+        int day = 1;
+        switch (day) {
+            case 1:
+                println("one");
+            case 2:
+                println("two");
+                break;
+            default:
+                println("default");
+        }
+    }
+}
+
+void main() {
+    AllWarningsTest test = new AllWarningsTest();
+    test.shadowAndUnused();
+    test.conditionAndSwitch();
+}

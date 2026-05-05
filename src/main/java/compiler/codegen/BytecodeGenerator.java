@@ -154,7 +154,8 @@ public class BytecodeGenerator {
         if (unreachable
                 && instr.getOpcode() != Opcode.LABEL
                 && instr.getOpcode() != Opcode.STACK_MAP_FRAME
-                && instr.getOpcode() != Opcode.METHOD_END) {
+                && instr.getOpcode() != Opcode.METHOD_END
+                && instr.getOpcode() != Opcode.EXCEPTION_TABLE_ENTRY) {
             return;
         }
         if (currentSourceLine > 0 && isRealInstruction(instr)) {
@@ -384,8 +385,7 @@ public class BytecodeGenerator {
                 else if (lv == 1L)
                     emit(Instruction.constPush(result, literal, "LCONST_1"));
                 else {
-                    int idx = constantPool.addConstant("LONG:" + literal);
-                    emit(Instruction.ldc(result, idx));
+                    emit(Instruction.constPush(result, literal, "LDC2_W"));
                 }
                 stackTracker.push(2);
                 return;
@@ -399,8 +399,7 @@ public class BytecodeGenerator {
                 else if (fv == 2f)
                     emit(Instruction.constPush(result, literal, "FCONST_2"));
                 else {
-                    int idx = constantPool.addConstant("FLOAT:" + literal);
-                    emit(Instruction.ldc(result, idx));
+                    emit(Instruction.constPush(result, literal, "LDC"));
                 }
                 stackTracker.push();
                 return;
@@ -412,8 +411,7 @@ public class BytecodeGenerator {
                 else if (dv == 1.0)
                     emit(Instruction.constPush(result, literal, "DCONST_1"));
                 else {
-                    int idx = constantPool.addConstant("DOUBLE:" + literal);
-                    emit(Instruction.ldc(result, idx));
+                    emit(Instruction.constPush(result, literal, "LDC2_W"));
                 }
                 stackTracker.push(2);
                 return;
@@ -680,7 +678,8 @@ public class BytecodeGenerator {
 
             case "THROW":
                 if (!node.getChildren().isEmpty()) {
-                    visit(node.getChildren().get(0));
+                    String exObj = visit(node.getChildren().get(0));
+                    emit(Instruction.throwException(exObj));
                     stackTracker.pop(1);
                 }
                 unreachable = true;
@@ -835,6 +834,7 @@ public class BytecodeGenerator {
         visitChildOfType(node, "BODY");
         methodVarTypes = null;
 
+        unreachable = false; // Reset to ensure method metadata is emitted
         emit(Instruction.maxStack(name, stackTracker.maxDepth()));
         emit(Instruction.maxLocals(name, slotAllocator.maxLocals()));
         emitLocalVarTable(varTypes);
@@ -1095,9 +1095,9 @@ public class BytecodeGenerator {
                 if (c.getType().equals("DEFAULT")) {
                     defaultLabel = lbl;
                 } else {
-                    String caseVal = newTemp();
-                    emit(Instruction.loadConst(caseVal, c.getValue()));
-                    stackTracker.push();
+                    // Evaluate case expression
+                    String caseVal = visit(c.getChildren().get(0));
+                    stackTracker.push(); // Conceptually push switchVal for the EQUAL comparison
                     String cmp = newTemp();
                     emit(Instruction.binary(Opcode.EQUAL, cmp, switchVal, "==", caseVal));
                     stackTracker.pop(2);
@@ -1425,7 +1425,7 @@ public class BytecodeGenerator {
     }
 
     private String handleNew(ASTNode node) {
-        String type = getChildValue(node, "TYPE");
+        String type = node.getValue();
         ASTNode args = getChildOfType(node, "ARGS");
         int argCount = 0;
         if (args != null) {
