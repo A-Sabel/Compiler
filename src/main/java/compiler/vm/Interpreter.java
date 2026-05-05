@@ -311,6 +311,15 @@ public class Interpreter {
                         for (Object arg : args) {
                             System.out.print(arg);
                         }
+                        break;
+                    }
+
+                    case PRINTLN: {
+                        int argCount = parseArgCount(instr.getArg1());
+                        List<Object> args = consumeArgs(context, argCount);
+                        for (Object arg : args) {
+                            System.out.print(arg);
+                        }
                         System.out.println();
                         break;
                     }
@@ -350,6 +359,13 @@ public class Interpreter {
     private Object invokeCall(List<Instruction> instructions, String name, String descriptor,
                               boolean isVirtual, Object receiver, List<Object> args) {
         if ("print".equals(name)) {
+            for (Object arg : args) {
+                System.out.print(arg);
+            }
+            return null;
+        }
+
+        if ("println".equals(name)) {
             for (Object arg : args) {
                 System.out.print(arg);
             }

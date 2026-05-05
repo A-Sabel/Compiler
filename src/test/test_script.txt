@@ -1,0 +1,19 @@
+class FibonacciTest {
+    void main() {
+        int n = 10;
+        int a = 0;
+        int b = 1;
+        int i = 0;
+        int temp;
+
+        print("Fibonacci sequence up to " + n + " :");
+
+        while (i < n) {
+            print(a);
+            temp = a + b;
+            a = b;
+            b = temp;
+            i = i + 1;
+        }
+    }
+}

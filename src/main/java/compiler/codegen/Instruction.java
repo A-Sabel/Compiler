@@ -59,6 +59,7 @@ public final class Instruction {
         NEW,            // result = new <type>(<argCount args already emitted as ARG)
         NEW_ARRAY,      // result = new <type>[size]
         PRINT,          // print <argCount args already emitted as ARG>
+        PRINTLN,
 
         // ── TAC class structure ───────────────────────────────────────────────
         CLASS,          // class <name>
@@ -228,6 +229,10 @@ public final class Instruction {
         return new Instruction(Opcode.PRINT, null, String.valueOf(argCount), null, null);
     }
 
+    public static Instruction println(int argCount) {
+        return new Instruction(Opcode.PRINTLN, null, String.valueOf(argCount), null, null);
+    }
+
     public static Instruction classDecl(String name) {
         return new Instruction(Opcode.CLASS, null, name, null, null);
     }
@@ -384,6 +389,7 @@ public final class Instruction {
             case NEW:           return result + " = new " + arg1 + "(" + op + " args)";
             case NEW_ARRAY:     return result + " = new " + arg1 + "[" + arg2 + "]";
             case PRINT:         return "print " + arg1;
+            case PRINTLN:       return "println " + arg1;
             case CLASS:         return "class " + arg1;
 
             case MAX_STACK:     return ".maxstack " + op + "  ; method=" + arg1;
