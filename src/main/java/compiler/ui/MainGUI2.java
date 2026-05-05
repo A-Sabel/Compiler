@@ -85,20 +85,20 @@ public class MainGUI2 extends JFrame {
     private boolean isDarkMode = true;
 
     // ── Light palette ─────────────────────────────────────────────────────────
-    private static final Color L_BG_WHITE        = new Color(0xFFFFFF);
+    private static final Color L_BG_WHITE        = new Color(0xF9F9F9);
     private static final Color L_BG_LIGHT        = new Color(0xF3F3F3);
     private static final Color L_BG_PANEL        = new Color(0xFAFAFA);
-    private static final Color L_HEADER_BG       = new Color(0x24292E);
+    private static final Color L_HEADER_BG       = new Color(0xF3F3F3);
     private static final Color L_ACCENT_BLACK    = new Color(0x1F2328);
     private static final Color L_ACCENT_DARK     = new Color(0x24292E);
-    private static final Color L_BORDER_COLOR    = new Color(0xEEEEEE);
-    private static final Color L_CONSOLE_BG      = new Color(0x1E1E1E);
-    private static final Color L_CONSOLE_TEXT    = new Color(0xCCCCCC);
+    private static final Color L_BORDER_COLOR    = new Color(0xDDDDDD);
+    private static final Color L_CONSOLE_BG      = new Color(0xF9F9F9);
+    private static final Color L_CONSOLE_TEXT    = new Color(0x333333);
     private static final Color L_TABLE_HEADER_BG = new Color(0xF0F0F0);
-    private static final Color L_TABLE_ROW_ALT   = new Color(0xF8F8F8);
+    private static final Color L_TABLE_ROW_ALT   = new Color(0xF3F3F3);
     private static final Color L_LINE_NUM_BG     = new Color(0xF3F3F3);
-    private static final Color L_LINE_NUM_FG     = new Color(0x858585);
-    private static final Color L_OUTPUT_HEADER   = new Color(0x2C2C2C);
+    private static final Color L_LINE_NUM_FG     = new Color(0x666666);
+    private static final Color L_OUTPUT_HEADER   = new Color(0xF0F0F0);
     private static final Color L_OUTPUT_TAB_BG   = new Color(0xE1E1E1);
     private static final Color L_OUTPUT_TAB_FG   = new Color(0xCCCCCC);
     private static final Color L_STATUS_BG       = new Color(0x007ACC);
@@ -126,9 +126,9 @@ public class MainGUI2 extends JFrame {
     // These replace the raw hex literals scattered throughout paintComponent() methods.
     private static final Color HOVER_BG_DARK     = new Color(0x2A2D2E);
     private static final Color HOVER_BG_LIGHT    = new Color(0xE8E8E8);
-    private static final Color MUTED_FG          = new Color(0x858585);
-    private static final Color LABEL_FG          = new Color(0xCCCCCC);
-    private static final Color HEADER_SEPARATOR  = new Color(0x1A1A1A);
+    private static final Color MUTED_FG          = new Color(0x666666);
+    private static final Color LABEL_FG          = new Color(0xCCCCCC); // Fallback, primary used via accessor
+    private static final Color HEADER_SEPARATOR  = new Color(0xDDDDDD);
     private static final Color SCROLLTHUMB_DARK  = new Color(0x555555);
     private static final Color SCROLLTHUMB_LIGHT = new Color(0xC1C1C1);
     private static final Color SCROLLTRACK_DARK  = new Color(0x1E1E1E);
@@ -160,9 +160,10 @@ public class MainGUI2 extends JFrame {
     private static final Color VSCODE_BLUE      = new Color(0x007ACC);
     private static final Color VSCODE_BLUE_HVR  = new Color(0x1E8AD6);
     private static final Color SUCCESS_GREEN    = new Color(0x4EC994);
-    private static final Color WARNING_YELLOW   = new Color(0xCCA700);
-    private static final Color ERROR_RED        = new Color(0xF14C4C);
-    private static final Color INFO_BLUE        = new Color(0x75BEFF);
+    private static final Color WARNING_YELLOW   = new Color(0xED6C02);
+    private static final Color ERROR_RED        = new Color(0xD32F2F);
+    private static final Color INFO_BLUE        = new Color(0x1976D2);
+    private Color labelFg()    { return isDarkMode ? D_ACCENT_BLACK : L_ACCENT_BLACK; }
 
     // ── Dynamic color accessors ───────────────────────────────────────────────
     private Color bg()         { return isDarkMode ? D_BG_WHITE        : L_BG_WHITE; }
@@ -183,6 +184,7 @@ public class MainGUI2 extends JFrame {
     private Color outTabFg()   { return isDarkMode ? D_OUTPUT_TAB_FG   : L_OUTPUT_TAB_FG; }
     private Color statusBg()   { return isDarkMode ? D_STATUS_BG       : L_STATUS_BG; }
     private Color hoverBg()    { return isDarkMode ? HOVER_BG_DARK     : HOVER_BG_LIGHT; }
+    private Color selectionBg(){ return isDarkMode ? SELECTION_BG_DARK : LIST_SEL_LIGHT; }
 
     // ── Fonts ─────────────────────────────────────────────────────────────────
     private static final Font FONT_MONO    = new Font("Consolas", Font.PLAIN, 13);
@@ -325,7 +327,7 @@ public class MainGUI2 extends JFrame {
         JPanel titlePanel = new JPanel(new GridLayout(2, 1, 0, 2));
         titlePanel.setOpaque(false);
         JLabel t1 = new JLabel("Compiler Visualization System");
-        t1.setFont(FONT_TITLE); t1.setForeground(LABEL_FG);
+        t1.setFont(FONT_TITLE); t1.setForeground(labelFg());
         JLabel t2 = new JLabel("Interactive Compiler Stage Explorer");
         t2.setFont(FONT_UI_SM); t2.setForeground(MUTED_FG);
         titlePanel.add(t1); titlePanel.add(t2);
@@ -391,9 +393,9 @@ public class MainGUI2 extends JFrame {
                     fg      = Color.WHITE;
                     borderC = getModel().isRollover() ? VSCODE_BLUE_HVR : LOGO_BLUE_END;
                 } else {
-                    base    = getModel().isPressed()  ? HOVER_BG_DARK :
-                              getModel().isRollover() ? HOVER_BG_DARK : new Color(0x00000000, true);
-                    fg      = LABEL_FG;
+                    base    = getModel().isPressed()  ? hoverBg() :
+                              getModel().isRollover() ? hoverBg() : new Color(0x00000000, true);
+                    fg      = labelFg();
                     borderC = getModel().isRollover() ? MUTED_FG : DIM_BORDER;
                 }
 
@@ -444,7 +446,7 @@ public class MainGUI2 extends JFrame {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
                 if (getModel().isRollover() || getModel().isPressed()) {
-                    g2.setColor(HOVER_BG_DARK);
+                    g2.setColor(hoverBg());
                     g2.fillRoundRect(0, 0, getWidth(), getHeight(), 5, 5);
                 }
 
@@ -466,7 +468,7 @@ public class MainGUI2 extends JFrame {
                 g2.drawString(icon, startX, baseY);
 
                 g2.setFont(FONT_UI_SM);
-                g2.setColor(LABEL_FG);
+                g2.setColor(labelFg());
                 g2.drawString(label, startX + iconW, baseY);
             }
         };
@@ -493,7 +495,7 @@ public class MainGUI2 extends JFrame {
                 Graphics2D g2 = (Graphics2D) g;
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 if (getModel().isRollover() || getModel().isPressed()) {
-                    g2.setColor(HOVER_BG_DARK);
+                    g2.setColor(hoverBg());
                     g2.fillRoundRect(0, 0, getWidth(), getHeight(), 5, 5);
                 }
                 g2.setFont(new Font("Segoe UI Symbol", Font.PLAIN, 16));
@@ -505,7 +507,7 @@ public class MainGUI2 extends JFrame {
                     (getHeight() + fm.getAscent() - fm.getDescent()) / 2 - 1);
             }
         };
-        btn.setPreferredSize(new Dimension(34, 32));
+        btn.setPreferredSize(new Dimension(34, 32)); btn.setForeground(labelFg());
         btn.setOpaque(false); btn.setContentAreaFilled(false);
         btn.setBorderPainted(false); btn.setFocusPainted(false);
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -596,14 +598,14 @@ public class MainGUI2 extends JFrame {
 
         JLabel fileName = new JLabel("main.java");
         fileName.setFont(FONT_UI_B);
-        fileName.setForeground(LABEL_FG);
+        fileName.setForeground(labelFg());
 
         JLabel closeBtn = new JLabel("\u00D7");
         closeBtn.setFont(new Font("Segoe UI", Font.PLAIN, 14));
         closeBtn.setForeground(MUTED_FG);
         closeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         closeBtn.addMouseListener(new MouseAdapter() {
-            @Override public void mouseEntered(MouseEvent e) { closeBtn.setForeground(LABEL_FG); }
+            @Override public void mouseEntered(MouseEvent e) { closeBtn.setForeground(labelFg()); }
             @Override public void mouseExited(MouseEvent e)  { closeBtn.setForeground(MUTED_FG); }
         });
 
@@ -613,6 +615,7 @@ public class MainGUI2 extends JFrame {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 6));
         toolbar.setOpaque(false);
         toolbar.add(buildEditorBtn("\uD83D\uDCCB", "Copy",   "Copy to clipboard"));
+        toolbar.add(buildEditorBtn("\uD83D\uDCCB", "Paste",  "Paste from clipboard"));
         toolbar.add(buildEditorBtn("\uD83D\uDCE4", "Export", "Export file"));
         toolbar.add(buildEditorBtn("\uD83D\uDDD1", "Clear",  "Clear editor"));
         tabBar.add(toolbar, BorderLayout.EAST);
@@ -684,7 +687,13 @@ public class MainGUI2 extends JFrame {
         btn.setToolTipText(tooltip);
 
         if (label.equals("Copy")) {
-            btn.addActionListener(e -> handleCopyAction());
+            if (tooltip.toLowerCase().contains("output")) {
+                btn.addActionListener(e -> handleCopyOutputAction());
+            } else {
+                btn.addActionListener(e -> handleCopyAction());
+            }
+        } else if (label.equals("Paste")) {
+            btn.addActionListener(e -> handlePasteAction());
         } else if (label.equals("Export")) {
             btn.addActionListener(e -> handleExportAction());
         } else if (label.equals("Clear")) {
@@ -732,6 +741,13 @@ public class MainGUI2 extends JFrame {
 
         headerLeft.add(dots); headerLeft.add(outputTitle);
         outputHeader.add(headerLeft, BorderLayout.WEST);
+
+        JPanel headerRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 4));
+        headerRight.setOpaque(false);
+        JButton copyOutBtn = buildEditorBtn("\uD83D\uDCCB", "Copy", "Copy output to clipboard");
+        copyOutBtn.setPreferredSize(new Dimension(80, 26));
+        headerRight.add(copyOutBtn);
+        outputHeader.add(headerRight, BorderLayout.EAST);
 
         String[][] tabs = {
             {"\u25B6", "Runtime Output"},
@@ -794,10 +810,10 @@ public class MainGUI2 extends JFrame {
             boolean sel = i == outputTabs.getSelectedIndex();
             JLabel iconLbl = new JLabel(tabs[i][0]);
             iconLbl.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 11));
-            iconLbl.setForeground(sel ? LABEL_FG : outTabFg());
+            iconLbl.setForeground(sel ? labelFg() : outTabFg());
             JLabel nameLbl = new JLabel(tabs[i][1]);
             nameLbl.setFont(FONT_UI_B);
-            nameLbl.setForeground(sel ? LABEL_FG : outTabFg());
+            nameLbl.setForeground(sel ? labelFg() : outTabFg());
 
             tabComp.add(iconLbl); tabComp.add(nameLbl);
             outputTabs.setTabComponentAt(i, tabComp);
@@ -808,7 +824,7 @@ public class MainGUI2 extends JFrame {
                 Component tc = outputTabs.getTabComponentAt(i);
                 if (tc instanceof JPanel panel) {
                     boolean sel = i == outputTabs.getSelectedIndex();
-                    Color fg = sel ? LABEL_FG : MUTED_FG;
+                    Color fg = sel ? labelFg() : MUTED_FG;
                     for (Component c : panel.getComponents()) {
                         if (c instanceof JLabel lbl) {
                             lbl.setForeground(fg);
@@ -934,15 +950,15 @@ public class MainGUI2 extends JFrame {
 
         runtimeArea = new JTextArea();
         runtimeArea.setFont(FONT_MONO_SM);
-        runtimeArea.setBackground(RUNTIME_BG);
-        runtimeArea.setForeground(LABEL_FG);
+        runtimeArea.setBackground(bg());
+        runtimeArea.setForeground(labelFg());
         runtimeArea.setEditable(false);
         runtimeArea.setBorder(BorderFactory.createEmptyBorder(10, 14, 10, 14));
         runtimeArea.setText("// Program output will appear here after execution\n");
 
         JScrollPane scroll = new JScrollPane(runtimeArea);
         scroll.setBorder(BorderFactory.createLineBorder(border()));
-        scroll.getViewport().setBackground(RUNTIME_BG);
+        scroll.getViewport().setBackground(bg());
         styleScrollBar(scroll.getVerticalScrollBar());
         p.add(scroll, BorderLayout.CENTER);
         return p;
@@ -987,11 +1003,11 @@ public class MainGUI2 extends JFrame {
                     boolean sel, boolean expanded, boolean leaf, int row, boolean hasFocus) {
                 super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
                 setFont(FONT_MONO_SM);
-                setBackground(sel ? SELECTION_BG_DARK : bg());
-                setForeground(sel ? Color.WHITE : isDarkMode ? D_ACCENT_BLACK : L_ACCENT_BLACK);
+                setBackground(sel ? selectionBg() : bg());
+                setForeground(sel ? (isDarkMode ? Color.WHITE : labelFg()) : isDarkMode ? D_ACCENT_BLACK : L_ACCENT_BLACK);
                 setBackgroundNonSelectionColor(bg());
-                setBackgroundSelectionColor(SELECTION_BG_DARK);
-                setBorderSelectionColor(SELECTION_BG_DARK);
+                setBackgroundSelectionColor(selectionBg());
+                setBorderSelectionColor(selectionBg());
 
                 String text = value.toString();
                 if (!sel) {
@@ -1191,9 +1207,9 @@ public class MainGUI2 extends JFrame {
         JPanel strip = new JPanel(new BorderLayout()) {
             @Override protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
-                g.setColor(isDarkMode ? D_BG_LIGHT : RUNTIME_BG);
+                g.setColor(bgLight());
                 g.fillRect(0, 0, getWidth(), getHeight());
-                g.setColor(D_BORDER_COLOR);
+                g.setColor(border());
                 g.drawLine(0, getHeight()-1, getWidth(), getHeight()-1);
             }
         };
@@ -1238,7 +1254,7 @@ public class MainGUI2 extends JFrame {
                 warningListModel.clear();
                 updateConsoleCounts();
             }
-            @Override public void mouseEntered(MouseEvent e) { clearLbl.setForeground(LABEL_FG); }
+            @Override public void mouseEntered(MouseEvent e) { clearLbl.setForeground(labelFg()); }
             @Override public void mouseExited(MouseEvent e)  { clearLbl.setForeground(MUTED_FG); }
         });
         cRight.add(clearLbl);
@@ -1300,7 +1316,7 @@ public class MainGUI2 extends JFrame {
                     g2.setColor(VSCODE_BLUE);
                     g2.fillRect(0, 0, getWidth(), 2);
                 }
-                setForeground(isActive ? LABEL_FG : MUTED_FG);
+                setForeground(isActive ? labelFg() : MUTED_FG);
                 super.paintComponent(g);
             }
         };
@@ -1435,6 +1451,20 @@ public class MainGUI2 extends JFrame {
         Clipboard cb = Toolkit.getDefaultToolkit().getSystemClipboard();
         cb.setContents(sel, sel);
         logAction("Editor content copied to clipboard.", INFO_BLUE);
+    }
+
+    private void handlePasteAction() {
+        codeEditor.paste();
+        logAction("Content pasted into editor.", INFO_BLUE);
+    }
+
+    private void handleCopyOutputAction() {
+        String content = runtimeArea.getText();
+        if (content.isEmpty() || content.startsWith("//")) return;
+        StringSelection sel = new StringSelection(content);
+        Clipboard cb = Toolkit.getDefaultToolkit().getSystemClipboard();
+        cb.setContents(sel, sel);
+        logAction("Runtime output copied to clipboard.", INFO_BLUE);
     }
 
     private void handleExportAction() {
@@ -1635,10 +1665,10 @@ public class MainGUI2 extends JFrame {
         branchLbl.setFont(FONT_UI_SM); branchLbl.setForeground(Color.WHITE);
 
         JLabel enc  = new JLabel("UTF-8");
-        enc.setFont(FONT_UI_SM); enc.setForeground(LABEL_FG);
+        enc.setFont(FONT_UI_SM); enc.setForeground(Color.WHITE);
 
         JLabel lang = new JLabel("Java");
-        lang.setFont(FONT_UI_SM); lang.setForeground(LABEL_FG);
+        lang.setFont(FONT_UI_SM); lang.setForeground(Color.WHITE);
 
         left.add(branchLbl); left.add(enc); left.add(lang);
 
@@ -1646,14 +1676,14 @@ public class MainGUI2 extends JFrame {
         right2.setOpaque(false);
 
         lnColLabel.setFont(FONT_UI_SM);
-        lnColLabel.setForeground(LABEL_FG);
+        lnColLabel.setForeground(Color.WHITE);
         right2.add(lnColLabel);
 
         JLabel spaces = new JLabel("Spaces: 4");
-        spaces.setFont(FONT_UI_SM); spaces.setForeground(LABEL_FG);
+        spaces.setFont(FONT_UI_SM); spaces.setForeground(Color.WHITE);
 
         JLabel modeLabel = new JLabel(isDarkMode ? "\uD83C\uDF19 Dark" : "\u2600 Light");
-        modeLabel.setFont(FONT_UI_SM); modeLabel.setForeground(LABEL_FG);
+        modeLabel.setFont(FONT_UI_SM); modeLabel.setForeground(Color.WHITE);
 
         right2.add(spaces); right2.add(modeLabel);
 
@@ -1671,8 +1701,8 @@ public class MainGUI2 extends JFrame {
         table.setBackground(bg());
         table.setForeground(accentDark());
         table.setGridColor(border());
-        table.setSelectionBackground(SELECTION_BG_DARK);
-        table.setSelectionForeground(Color.WHITE);
+        table.setSelectionBackground(selectionBg());
+        table.setSelectionForeground(isDarkMode ? Color.WHITE : labelFg());
         table.setShowVerticalLines(true);
         table.setShowHorizontalLines(false);
         table.setIntercellSpacing(new Dimension(0, 0));
@@ -1691,7 +1721,7 @@ public class MainGUI2 extends JFrame {
                     JTable t, Object val, boolean sel, boolean foc, int row, int col) {
                 Component c = super.getTableCellRendererComponent(t, val, sel, foc, row, col);
                 if (!sel) {
-                    c.setBackground(row % 2 == 0 ? bg() : tblRowAlt());
+                    c.setBackground(row % 2 == 0 ? tblRowAlt() : bg());
                     c.setForeground(accentDark());
                 }
                 setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 10));
