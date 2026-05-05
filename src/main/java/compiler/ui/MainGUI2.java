@@ -48,6 +48,7 @@ import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
+import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JTextPane;
@@ -71,7 +72,6 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeSelectionModel;
-import javax.swing.JTable;
 
 import compiler.CompilerPipeline;
 import compiler.codegen.Instruction;
@@ -1257,9 +1257,10 @@ public class MainGUI2 extends JFrame {
         consolePane.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
 
         String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+        appendConsole("\u2713 [" + now + "] Compiler System ready.", SUCCESS_GREEN);
         appendConsole("\u2713 [" + now + "] Welcome to console! Compiler logs appear here.", SUCCESS_GREEN);
 
-        appendConsole("\u2713 [" + now + "] Compiler Visualization System ready.", SUCCESS_GREEN);
+
 
         consoleLayout    = new CardLayout();
         consoleCardPanel = new JPanel(consoleLayout);
