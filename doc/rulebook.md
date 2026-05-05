@@ -34,6 +34,7 @@
 
 - **Statement Grammar:** Enforces structural rules (e.g., `ifStmt → if ( expr ) block [ else block ]`).
 - **Operator Precedence (Lowest to Highest):** Assignment, Logical OR, Logical AND, Equality, Relational, Additive, Multiplicative, Unary.
+- **Lambda Expressions:** The parser recognizes anonymous function syntax such as `(a, b) -> a + b` and single-parameter lambdas like `x -> x + 1`. Lambda bodies may be either a block or a single expression.
 
 ### 5. Semantic Specifications (Phase 3: Logic & Types)
 
@@ -51,6 +52,7 @@
 - **Decimal Limitations:** A `CONSTANT` may only contain a single decimal point `.`, and it must be immediately followed by a digit.
   - _Compiler Behavior:_ If a second decimal point is encountered, the scanner terminates the constant collection and treats the subsequent decimal as `PUNCTUATION`.
 - **Unterminated Literals:** A `LITERAL` string or character must be closed with a matching quote before the end of the line (`\n`). Failure to close throws a fatal Lexer error.
+- **Arrow Tokenization:** The lexer must preserve the lambda arrow token (`->`) so the parser can distinguish lambdas from subtraction/greater-than sequences.
 
 ### 7. Syntactic Constraints
 
@@ -64,6 +66,7 @@
 
 - **Valid Assignment Targets (L-Values):** Only user-defined `IDENTIFIER` nodes are valid L-values (Left-Hand Side targets) for assignment operations. The parser might build an `ASSIGN` tree for `5 = x`, but the semantic analyzer must reject it.
 - **Reserved Keyword Collisions:** Attempting to declare `int public = 5;` is strictly prohibited. The Parser expects an `IDENTIFIER`; receiving a `KEYWORD` throws a syntax error.
+- **Lambda Typing:** Lambda expressions are treated as callable values. The analyzer permits `var` declarations initialized with lambdas and infers the lambda type from the initializer.
 
 ### 9. Type Coercion & Promotion
 
@@ -77,6 +80,7 @@
 - **Arity Matching:** The number of arguments provided must exactly match the number of parameters defined in the signature.
 - **Parameter Type Matching:** Each argument provided must be type-compatible with the corresponding parameter.
 - **Return Path Validation:** If a method has a non-void return type, all logical execution paths must conclude with a `return` statement outputting a compatible type.
+- **Lambda Invocation:** Stored lambda values are resolved through method-call lowering so a variable bound to a lambda may be invoked with call syntax after generation.
 
 ### 11. Control Flow Constraints (Semantic)
 
@@ -165,12 +169,14 @@ The compiler translates the AST into a high-level, Three-Address Code (TAC) repr
 - **20.1 Constant Folding:** The Code Generator SHOULD identify expressions consisting entirely of literals (e.g., `2 + 3`) and emit the final result (`PUSH 5`) instead of the arithmetic instructions. This reduces runtime CPU cycles.
 - **20.2 Peephole Optimization:** The generator SHOULD scan the instruction stream for inefficient sequences. For example, a `STORE x` followed immediately by a `LOAD x` can often be optimized into a `DUP` followed by a `STORE x`.
 - **20.3 Strength Reduction:** Expensive operations SHOULD be replaced with cheaper equivalents. For example, multiplying an integer by 2 SHOULD be translated as a bitwise left shift (`ISHL 1`) rather than a full multiplication (`IMUL`).
+- **20.4 Lambda Method Emission:** Pending lambda bodies MUST be emitted as generated methods even in top-level scripts, not only inside class declarations.
 
 ### 21. Debugging & Traceability Metadata
 
 - **21.1 LineNumberTable Generation:** The generator MUST maintain a mapping between bytecode offsets and source code line numbers. This is critical for generating meaningful stack traces when a program crashes at runtime.
 - **21.2 LocalVariableTable:** To support debuggers, the generator SHOULD emit a table mapping slot indices back to their original names (e.g., "Slot 1 is 'counter'"). Without this, debuggers can only show raw slot numbers.
 - **21.3 SourceFile Attribute:** Every compiled class MUST include an attribute identifying the original source file name (e.g., `App.java`), ensuring the JVM can locate the code for debugging.[cite: 1]
+- **21.4 Editor-Aware Indentation:** The UI should preserve indentation state consistently across auto-indent, folding, and settings changes so the editor remains predictable when code is reformatted.
 
 ### 22. Implicit Lifecycle & Initialization
 
@@ -222,6 +228,7 @@ The generated `Instruction` list is executed by a register-based interpreter.
 
 - **27.1 System Interop:** The compiler MUST provide a set of pre-defined method signatures for basic I/O (e.g., `print`, `println`, `readInt`).
 - **27.2 Native Method Mapping:** Instructions like `PRINT` MUST map directly to the host language's standard output (e.g., `System.out.println` in Java).
+- **27.3 Lambda-Friendly Runtime:** Callable values backed by generated lambda methods must be invokable through the same method-call path used by normal methods.
 
 ---
 

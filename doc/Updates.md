@@ -133,10 +133,6 @@
 
 ---
 
-## ⚠️ Out of Scope / Future Work
-*(None! All planned features are completed!)*
----
-
 ## 🎯 Recent Improvements (May 5, 2026)
 
 ### Compiler UX & Interface
@@ -145,6 +141,9 @@
 - Added an interactive Abstract Syntax Tree (AST) explorer with type-based syntax coloring.
 - Enhanced console with rich text (color-coded errors, warnings, and success logs) and independent tracking tabs.
 - Included line number gutters and robust editor functionality (copy, paste, export, clear).
+- Added editor auto-indent on Enter plus Tab / Shift-Tab indent control.
+- Added indent guides in the editor and gutter, plus click-to-fold brace blocks.
+- Added a Settings control for indentation style selection (tabs, 2 spaces, 4 spaces).
 
 ### Parser Enhancements
 
@@ -153,6 +152,7 @@
 - Implemented intelligent type typo detection using Levenshtein edit distance
 - Added **Generic Types Support**, cleanly parsing and performing Type Erasure on constructs like `class Box<T>`, `List<String>`, and the diamond operator `<>`.
 - Added **Lambda Expressions Support** (`(a, b) -> a + b`), implementing method synthesis generation to translate anonymous closures into JVM-compliant static methods.
+- Fixed lambda compile/runtime handling for `var`-typed lambda variables and ensured pending lambda methods are emitted for top-level programs.
   - Example: `nt a = 10;` → suggests `int` with edit distance ≤ 1
 - Error recovery with panic mode for graceful failure handling
 
@@ -184,6 +184,8 @@
 - Confirmed parser output for array-heavy control-flow programs matches the expected AST shape.
 - Verified array allocation, load, and store behavior through runtime execution.
 - Confirmed for-loop postfix updates, switch handling, and warning reporting all continue to work after the semantic analyzer changes.
+- Verified lambda execution with a minimal source snippet now returns the expected result (`20`) instead of a null placeholder.
+- Rebuilt successfully after the editor indentation, folding, and lambda runtime updates.
 
 ---
 
