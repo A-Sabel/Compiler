@@ -1,7 +1,5 @@
 // ============================================================================
-// SabelJ Compiler - 20 Standalone Test Cases
-// INSTRUCTIONS: Copy any individual test block into the editor and hit Run.
-// Each test is now a fully self-contained program with its own main() method!
+// Compiler - 20 Standalone Test Cases
 // ============================================================================
 
 // --- 1. Basic I/O and Strings ---

@@ -10,6 +10,7 @@ import compiler.codegen.Instruction;
 import compiler.codegen.Instruction.Opcode;
 
 public class Interpreter {
+    private static final String LAMBDA_PAYLOAD_SEP = "\u001F";
     private final Map<Integer, Object> constPool = new HashMap<>();
     private final Map<String, MethodInfo> methodTable = new HashMap<>();
     private final Map<Integer, MethodInfo> methodsByStartIndex = new HashMap<>();
@@ -317,6 +318,12 @@ public class Interpreter {
                         String rawName = instr.getArg1();
                         Object resolved = resolveValue(rawName, context);
                         String name = (resolved instanceof String) ? (String) resolved : rawName;
+                        if (isLambdaPayload(name)) {
+                            List<Object> expandedArgs = new ArrayList<>(decodeLambdaCapturedArgs(name, context));
+                            expandedArgs.addAll(args);
+                            args = expandedArgs;
+                            name = decodeLambdaMethodName(name);
+                        }
                         Object returnValue = invokeCall(instructions, name, instr.getDescriptor(), false, null, args);
                         if (instr.getResult() != null) {
                             context.temps.put(instr.getResult(), returnValue);
@@ -750,6 +757,34 @@ public class Interpreter {
 
     private String slotKey(String slot) {
         return "slot:" + slot;
+    }
+
+    private boolean isLambdaPayload(String name) {
+        return name != null && name.contains(LAMBDA_PAYLOAD_SEP);
+    }
+
+    private String decodeLambdaMethodName(String payload) {
+        if (!isLambdaPayload(payload)) {
+            return payload;
+        }
+        int sepIdx = payload.indexOf(LAMBDA_PAYLOAD_SEP);
+        return sepIdx >= 0 ? payload.substring(0, sepIdx) : payload;
+    }
+
+    private List<Object> decodeLambdaCapturedArgs(String payload, ExecutionContext context) {
+        List<Object> captured = new ArrayList<>();
+        if (!isLambdaPayload(payload)) {
+            return captured;
+        }
+        String[] parts = payload.split(java.util.regex.Pattern.quote(LAMBDA_PAYLOAD_SEP), -1);
+        for (int i = 1; i < parts.length; i++) {
+            String token = parts[i];
+            if (token == null || token.isEmpty()) {
+                continue;
+            }
+            captured.add(resolveValue(token, context));
+        }
+        return captured;
     }
 
     private String methodKey(String name, String descriptor) {

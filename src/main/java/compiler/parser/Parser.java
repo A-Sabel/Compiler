@@ -706,9 +706,11 @@ public class Parser {
             Tokens t1 = peek(1);
             if (t1 != null && t1.getLexeme().equals("-")) {
                 Tokens t2 = peek(2);
-                if (t2 != null && t2.getLexeme().equals(">")) return true;
+                if (t2 != null && t2.getLexeme().equals(">"))
+                    return true;
             }
-            if (t1 != null && t1.getLexeme().equals("->")) return true;
+            if (t1 != null && t1.getLexeme().equals("->"))
+                return true;
         }
         // Case 2: (a, b) -> ...
         if (check("SPECIAL_CHAR", "(")) {
@@ -720,9 +722,11 @@ public class Parser {
                 Tokens t1 = peek(i + 1);
                 if (t1 != null && t1.getLexeme().equals("-")) {
                     Tokens t2 = peek(i + 2);
-                    if (t2 != null && t2.getLexeme().equals(">")) return true;
+                    if (t2 != null && t2.getLexeme().equals(">"))
+                        return true;
                 }
-                if (t1 != null && t1.getLexeme().equals("->")) return true;
+                if (t1 != null && t1.getLexeme().equals("->"))
+                    return true;
             }
         }
         return false;
@@ -738,8 +742,9 @@ public class Parser {
             if (!check("SPECIAL_CHAR", ")")) {
                 do {
                     String pType = "var";
-                    if (isTypeKeyword() || isPotentialTypeTypo() || 
-                       (currentType().equals("IDENTIFIER") && peek(1) != null && peek(1).getType().equals("IDENTIFIER"))) {
+                    if (isTypeKeyword() || isPotentialTypeTypo() ||
+                            (currentType().equals("IDENTIFIER") && peek(1) != null
+                                    && peek(1).getType().equals("IDENTIFIER"))) {
                         pType = currentLexeme();
                         advance();
                         parseGenericTypeParams();
@@ -767,8 +772,10 @@ public class Parser {
             advance();
         } else {
             consume("OPERATOR", "-");
-            if (check("OPERATOR", ">")) advance();
-            else consume("PUNCTUATION", ">");
+            if (check("OPERATOR", ">"))
+                advance();
+            else
+                consume("PUNCTUATION", ">");
         }
 
         lambdaNode.addChild(paramsNode);
@@ -1285,21 +1292,26 @@ public class Parser {
      * Handles nested generics like `Map<String, List<Integer>>` gracefully.
      */
     private String parseGenericTypeParams() {
-        if (!check("OPERATOR", "<")) return "";
+        if (!check("OPERATOR", "<"))
+            return "";
         StringBuilder sb = new StringBuilder();
         sb.append(currentLexeme());
         advance(); // consume '<'
         int depth = 1;
-        
+
         while (!isAtEnd() && depth > 0) {
             String lex = currentLexeme();
             sb.append(lex);
-            
-            if (lex.equals("<")) depth++;
-            else if (lex.equals(">")) depth--;
-            else if (lex.equals(">>")) depth -= 2;
-            else if (lex.equals(">>>")) depth -= 3;
-            
+
+            if (lex.equals("<"))
+                depth++;
+            else if (lex.equals(">"))
+                depth--;
+            else if (lex.equals(">>"))
+                depth -= 2;
+            else if (lex.equals(">>>"))
+                depth -= 3;
+
             advance();
         }
         return sb.toString();
@@ -1308,8 +1320,18 @@ public class Parser {
     private boolean isMethodStart() {
         // Case 1: starts with a modifier (public, private, static, protected)
         if (isModifier()) {
-            if (peekIsType() && checkPeek(2, "IDENTIFIER", null) && checkPeek(3, "SPECIAL_CHAR", "(")) {
-                return true;
+            if (peekIsType()) {
+                // After the modifier the layout is: modifier, type, [generics], name, '('
+                // Skip over any generic type params or array brackets when looking
+                // for the method name and the following '('.
+                int nameOffset = skipGenericsAndArrayFrom(2); // relative offset after the type
+                Tokens nameTok = peek(nameOffset);
+                Tokens openTok = peek(nameOffset + 1);
+                if (nameTok != null && "IDENTIFIER".equals(nameTok.getType())
+                        && openTok != null && "SPECIAL_CHAR".equals(openTok.getType())
+                        && "(".equals(openTok.getLexeme())) {
+                    return true;
+                }
             }
             if (peekIsModifier()) {
                 return true;
@@ -1317,13 +1339,62 @@ public class Parser {
         }
         // Case 2: starts directly with a return type: int calculate(
         else if (isTypeKeyword()) {
-            // FIX: Use getType() via checkPeek instead of the broken reflection-based
-            // peekIsIdentifier()
-            if (checkPeek(1, "IDENTIFIER", null) && checkPeek(2, "SPECIAL_CHAR", "(")) {
+            // After a return type there may be generic params or array brackets
+            // before the method name. Skip them when checking for the pattern
+            // `Type [<...>] name ('`.
+            int nameOffset = skipGenericsAndArrayFrom(1); // relative offset after the type
+            Tokens nameTok = peek(nameOffset);
+            Tokens openTok = peek(nameOffset + 1);
+            if (nameTok != null && "IDENTIFIER".equals(nameTok.getType())
+                    && openTok != null && "SPECIAL_CHAR".equals(openTok.getType())
+                    && "(".equals(openTok.getLexeme())) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Given a relative offset (1-based), skip over any generic type parameter
+     * sequences (`< ... >`) and trailing array brackets (`[]`) so callers can
+     * reliably find the following identifier (e.g. method name) or punctuation.
+     *
+     * This method uses `peek(offset)` semantics (offset relative to current
+     * parser position) and returns the new relative offset pointing at the
+     * first token after any generics/arrays.
+     */
+    private int skipGenericsAndArrayFrom(int offset) {
+        int i = offset;
+
+        // Skip generic parameter sequences like <T, List<U>>
+        Tokens t = peek(i);
+        if (t != null && "OPERATOR".equals(t.getType()) && "<".equals(t.getLexeme())) {
+            int depth = 0;
+            while (peek(i) != null) {
+                String lex = peek(i).getLexeme();
+                if (lex.equals("<"))
+                    depth++;
+                else if (lex.equals(">"))
+                    depth--;
+                else if (lex.equals(">>"))
+                    depth -= 2;
+                else if (lex.equals(">>>"))
+                    depth -= 3;
+                i++;
+                if (depth <= 0)
+                    break;
+            }
+        }
+
+        // Skip array suffixes like []
+        while (peek(i) != null && "SPECIAL_CHAR".equals(peek(i).getType()) && "[".equals(peek(i).getLexeme())) {
+            i++; // skip '['
+            if (peek(i) != null && "]".equals(peek(i).getLexeme())) {
+                i++; // skip ']'
+            }
+        }
+
+        return i;
     }
 
     private boolean isAtEnd() {

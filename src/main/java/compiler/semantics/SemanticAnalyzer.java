@@ -16,6 +16,7 @@ public class SemanticAnalyzer {
 
     private String currentMethodReturnType = null;
     private int lambdaDepth = 0;
+    private String currentClassName = null;
 
     private int loopDepth = 0;
     private boolean isReachable = true;
@@ -42,6 +43,9 @@ public class SemanticAnalyzer {
     // Track exceptions declared in the current method's throws clause
     private final Set<String> currentMethodThrows = new HashSet<>();
 
+    // Track class fields so field access can be type-checked by receiver type.
+    private final Map<String, Map<String, String>> classFieldTypes = new HashMap<>();
+
     public SemanticAnalyzer() {
         this.symbolTable = new SymbolTable();
         // Initialize with global scope
@@ -61,9 +65,11 @@ public class SemanticAnalyzer {
                 break;
 
             case "CLASS_DECL":
+                currentClassName = node.getValue();
                 symbolTable.enterScope();
                 analyzeChildren(node);
                 symbolTable.exitScope();
+                currentClassName = null;
                 break;
 
             case "METHOD_DECL":
@@ -334,7 +340,10 @@ public class SemanticAnalyzer {
                 break;
             }
         }
-        if (!isCaught && !currentMethodThrows.contains(exType) && !currentMethodThrows.contains("Exception")) {
+        if (isCaught || isExceptionLikeType(exType)) {
+            return;
+        }
+        if (!currentMethodThrows.contains(exType) && !currentMethodThrows.contains("Exception")) {
             ErrorHandler.report("Semantic Error: Unhandled exception type '" + exType
                     + "'. Must be caught or declared to be thrown.", node.getLine(), node.getColumn());
         }
@@ -537,6 +546,12 @@ public class SemanticAnalyzer {
 
         symbolTable.defineVariable(name, type);
 
+        // Record class fields when we are in class scope but not inside a method.
+        if (currentClassName != null && currentMethodReturnType == null) {
+            classFieldTypes.computeIfAbsent(currentClassName, k -> new HashMap<>())
+                    .put(name, type);
+        }
+
         // Track variable declaration for unused variable detection
         if (!varDeclarations.isEmpty()) {
             varDeclarations.peek().put(name, new VarInfo(type, nameNode.getLine(), nameNode.getColumn()));
@@ -701,34 +716,54 @@ public class SemanticAnalyzer {
         // 1. Resolve the base variable name and validate the target type
         String varName;
         String lhsType = lhs.getType();
+        String expectedType = null;
 
         if (lhsType.equals("ARRAY_ACCESS")) {
             // For array access, the name is in the first child (the identifier)
             varName = lhs.getChildren().get(0).getValue();
+            String baseVarType = symbolTable.lookupVariableType(varName);
+            if (baseVarType == null) {
+                ErrorHandler.report("Semantic Error: Variable '" + varName + "' used in assignment before declaration.",
+                        node.getLine(), node.getColumn());
+                return;
+            }
+            expectedType = baseVarType.endsWith("[]")
+                    ? baseVarType.substring(0, baseVarType.length() - 2)
+                    : baseVarType;
         } else if (lhsType.equals("IDENTIFIER") || lhsType.equals("FIELD_ACCESS")) {
             varName = lhs.getValue();
+            if (lhsType.equals("FIELD_ACCESS")) {
+                expectedType = resolveFieldAccessType(lhs);
+                if (expectedType == null) {
+                    String receiverType = lhs.getChildren().isEmpty()
+                            ? null
+                            : inferExpressionType(lhs.getChildren().get(0));
+                    if (reportUnknownField(lhs, receiverType, varName)) {
+                        return;
+                    }
+                    ErrorHandler.report(
+                            "Semantic Error: Variable '" + varName + "' used in assignment before declaration.",
+                            node.getLine(), node.getColumn());
+                    return;
+                }
+            }
         } else {
             ErrorHandler.report("Semantic Error: Invalid assignment target.", node.getLine(), node.getColumn());
             return;
         }
 
-        // 2. Look up the variable in the Symbol Table
-        String baseVarType = symbolTable.lookupVariableType(varName);
-        if (baseVarType == null) {
-            ErrorHandler.report("Semantic Error: Variable '" + varName + "' used in assignment before declaration.",
-                    node.getLine(), node.getColumn());
-            return;
+        // 2. Look up the variable in the Symbol Table (local/field declarations)
+        if (expectedType == null) {
+            String baseVarType = symbolTable.lookupVariableType(varName);
+            if (baseVarType == null) {
+                ErrorHandler.report("Semantic Error: Variable '" + varName + "' used in assignment before declaration.",
+                        node.getLine(), node.getColumn());
+                return;
+            }
+            expectedType = baseVarType;
         }
 
-        // 3. Determine the exact expected type on the Left-Hand Side
-        String expectedType = baseVarType;
-
-        if (lhsType.equals("ARRAY_ACCESS")) {
-            // If assigning to cars[1], we expect String, not String[]
-            if (baseVarType.endsWith("[]")) {
-                expectedType = baseVarType.substring(0, baseVarType.length() - 2);
-            }
-        } else if (lhsType.equals("FIELD_ACCESS") && lhs.getValue().equals("length")) {
+        if (lhsType.equals("FIELD_ACCESS") && lhs.getValue().equals("length")) {
             // Prevent assigning to read-only .length property
             ErrorHandler.report("Semantic Error: Cannot assign value to read-only property 'length'.",
                     lhs.getLine(), lhs.getColumn());
@@ -1114,8 +1149,12 @@ public class SemanticAnalyzer {
                 }
 
                 checkUnusedVariables();
+                Set<String> lambdaUsed = new HashSet<>(varUsage.peek());
                 varDeclarations.pop();
                 varUsage.pop();
+                if (!varUsage.isEmpty()) {
+                    varUsage.peek().addAll(lambdaUsed);
+                }
                 lambdaDepth--;
                 symbolTable.exitScope();
                 return "Lambda";
@@ -1148,16 +1187,31 @@ public class SemanticAnalyzer {
             case "ARRAY_LITERAL": {
                 if (expr.getChildren().isEmpty())
                     return "Object[]";
-                String firstElem = inferExpressionType(expr.getChildren().get(0));
+                String elementType = null;
                 for (ASTNode element : expr.getChildren()) {
                     String elemType = inferExpressionType(element);
-                    if (!isTypeCompatible(firstElem, elemType)) {
+
+                    // A leading null should not lock the entire array to null[];
+                    // instead, use the first concrete element type as the array type.
+                    if ("null".equals(elemType)) {
+                        continue;
+                    }
+
+                    if (elementType == null) {
+                        elementType = elemType;
+                        continue;
+                    }
+
+                    if (!isTypeCompatible(elementType, elemType)) {
                         ErrorHandler.report(
                                 "Semantic Error: Inconsistent types in array literal.",
                                 element.getLine(), element.getColumn());
                     }
                 }
-                return firstElem + "[]";
+                if (elementType == null) {
+                    return "null[]";
+                }
+                return elementType + "[]";
             }
 
             case "ARRAY_ACCESS": {
@@ -1195,7 +1249,12 @@ public class SemanticAnalyzer {
                         && fieldName.equals("length")) {
                     return "int";
                 }
-                return "Object";
+                String fieldType = resolveFieldType(receiverType, fieldName);
+                if (fieldType != null) {
+                    return fieldType;
+                }
+                reportUnknownField(expr, receiverType, fieldName);
+                return "type_error";
             }
 
             // ASSIGN used as an expression (e.g. int x = (y = 5)) — validate and return RHS
@@ -1365,6 +1424,13 @@ public class SemanticAnalyzer {
 
         // Arrays: only exact match (no covariance for this subset checker)
         if (expectedType.endsWith("[]") || actualType.endsWith("[]")) {
+            if ("null[]".equals(actualType)) {
+                String componentType = expectedType.endsWith("[]")
+                        ? expectedType.substring(0, expectedType.length() - 2)
+                        : expectedType;
+                return expectedType.endsWith("[]") && !isNumericType(componentType)
+                        && !"boolean".equals(componentType);
+            }
             return expectedType.equals(actualType);
         }
 
@@ -1557,6 +1623,56 @@ public class SemanticAnalyzer {
 
     private boolean isOverbroadExceptionType(String type) {
         return "Exception".equals(type) || "Throwable".equals(type) || "RuntimeException".equals(type);
+    }
+
+    private String resolveFieldAccessType(ASTNode fieldAccess) {
+        if (fieldAccess == null || fieldAccess.getChildren().isEmpty()) {
+            return null;
+        }
+        String receiverType = inferExpressionType(fieldAccess.getChildren().get(0));
+        return resolveFieldType(receiverType, fieldAccess.getValue());
+    }
+
+    private String resolveFieldType(String receiverType, String fieldName) {
+        if (receiverType == null || fieldName == null) {
+            return null;
+        }
+        if (receiverType.endsWith("[]") && "length".equals(fieldName)) {
+            return "int";
+        }
+        Map<String, String> fields = classFieldTypes.get(receiverType);
+        if (fields != null && fields.containsKey(fieldName)) {
+            return fields.get(fieldName);
+        }
+        return null;
+    }
+
+    private boolean reportUnknownField(ASTNode fieldAccess, String receiverType, String fieldName) {
+        if (fieldAccess == null || receiverType == null || fieldName == null) {
+            return false;
+        }
+        if (receiverType.endsWith("[]") && "length".equals(fieldName)) {
+            return false;
+        }
+        ErrorHandler.report(
+                "Semantic Error: Field '" + fieldName + "' not found on type '" + receiverType + "'.",
+                fieldAccess.getLine(), fieldAccess.getColumn());
+        return true;
+    }
+
+    /**
+     * Returns true for exception-like types that this compiler routes dynamically.
+     * This keeps the semantic checker from enforcing Java checked-exception rules
+     * on runtime-routed throws such as `throw new Exception(...)`.
+     */
+    private boolean isExceptionLikeType(String type) {
+        if (type == null || type.isBlank()) {
+            return false;
+        }
+        if (isOverbroadExceptionType(type)) {
+            return true;
+        }
+        return type.endsWith("Exception") || type.endsWith("Error") || type.endsWith("Throwable");
     }
 
     private boolean isEmptyCatchBody(ASTNode catchBody) {

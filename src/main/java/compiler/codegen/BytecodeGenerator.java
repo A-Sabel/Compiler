@@ -2,9 +2,11 @@ package compiler.codegen;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import compiler.codegen.Instruction.Opcode;
 import compiler.parser.ast.ASTNode;
@@ -122,6 +124,7 @@ public class BytecodeGenerator {
     private final Map<String, String> cseResultMap = new HashMap<>();
     private int lambdaCounter = 1;
     private final List<ASTNode> pendingLambdas = new ArrayList<>();
+    private static final String LAMBDA_PAYLOAD_SEP = "\u001F";
 
     public void setSourceFileName(String name) {
         this.sourceFileName = name;
@@ -565,7 +568,15 @@ public class BytecodeGenerator {
         slotAllocator.reset(false);
         stackTracker.reset();
 
+        List<String> captureNames = splitAttribute(node.getAttribute("lambda_capture_names"));
+        List<String> captureJvmTypes = splitAttribute(node.getAttribute("lambda_capture_types"));
+
         List<String> paramTypes = new ArrayList<>();
+        for (int i = 0; i < captureJvmTypes.size(); i++) {
+            String captureJvmType = captureJvmTypes.get(i);
+            paramTypes.add(jvmDescriptorToSourceType(normalizeJvmDescriptor(captureJvmType, "Ljava/lang/Object;")));
+        }
+
         ASTNode params = getChildOfType(node, "PARAMS");
         if (params != null) {
             for (ASTNode param : params.getChildren()) {
@@ -579,6 +590,16 @@ public class BytecodeGenerator {
         emit(Instruction.methodDescriptor(name, descriptor));
 
         Map<String, String> varTypes = new HashMap<>();
+
+        for (int i = 0; i < captureNames.size(); i++) {
+            String captureName = captureNames.get(i);
+            String captureJvmType = i < captureJvmTypes.size() ? captureJvmTypes.get(i) : "Ljava/lang/Object;";
+            String normalizedJvmType = normalizeJvmDescriptor(captureJvmType, "Ljava/lang/Object;");
+            slotAllocator.allocate(captureName, normalizedJvmType);
+            varTypes.put(captureName, normalizedJvmType);
+            emit(Instruction.param(captureName));
+        }
+
         if (params != null) {
             for (ASTNode param : params.getChildren()) {
                 String pName = getChildValue(param, "NAME");
@@ -806,14 +827,12 @@ public class BytecodeGenerator {
                     stackTracker.push(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
                     return result;
                 }
-                // Not a local. If we're inside a method, try class-field snapshot
+                // Not a local. If we're inside an instance method, try class fields.
                 if (methodVarTypes != null && currentClassName != null) {
-                    Map<String, Integer> slots = classFieldSlots.get(currentClassName);
-                    Map<String, String> types = classFieldTypes.get(currentClassName);
-                    if (slots != null && slots.containsKey(varName)) {
-                        // Prefer field load from the class-level container
+                    Map<String, String> fields = classFieldTypes.get(currentClassName);
+                    if (fields != null && fields.containsKey(varName)) {
                         String result = newTemp();
-                        emit(Instruction.fieldLoad(result, currentClassName, varName));
+                        emit(Instruction.fieldLoad(result, "this", varName));
                         stackTracker.push(1);
                         return result;
                     }
@@ -854,11 +873,171 @@ public class BytecodeGenerator {
     private String handleLambda(ASTNode node) {
         String lambdaName = "lambda$" + (lambdaCounter++);
         node.setAttribute("lambda_name", lambdaName);
+
+        List<String> captureNames = resolveLambdaCaptureNames(node);
+        List<String> captureTypes = new ArrayList<>();
+        List<String> captureValueTemps = new ArrayList<>();
+
+        for (int i = 0; i < captureNames.size(); i++) {
+            String captureName = captureNames.get(i);
+            String captureJvmType = inferCaptureJvmType(captureName);
+            captureTypes.add(captureJvmType);
+            captureValueTemps.add(materializeCaptureValueTemp(captureName));
+        }
+
+        node.setAttribute("lambda_capture_names", String.join(LAMBDA_PAYLOAD_SEP, captureNames));
+        node.setAttribute("lambda_capture_types", String.join(LAMBDA_PAYLOAD_SEP, captureTypes));
+
         pendingLambdas.add(node);
         String result = newTemp();
-        emit(Instruction.lambdaRef(result, lambdaName));
+        emit(Instruction.lambdaRef(result, encodeLambdaPayload(lambdaName, captureValueTemps)));
         stackTracker.push();
         return result;
+    }
+
+    private String encodeLambdaPayload(String lambdaName, List<String> captureValueTemps) {
+        if (captureValueTemps == null || captureValueTemps.isEmpty()) {
+            return lambdaName;
+        }
+        List<String> parts = new ArrayList<>();
+        parts.add(lambdaName);
+        parts.addAll(captureValueTemps);
+        return String.join(LAMBDA_PAYLOAD_SEP, parts);
+    }
+
+    private List<String> splitAttribute(String attr) {
+        List<String> out = new ArrayList<>();
+        if (attr == null || attr.isBlank()) {
+            return out;
+        }
+        String[] parts = attr.split(java.util.regex.Pattern.quote(LAMBDA_PAYLOAD_SEP), -1);
+        for (String part : parts) {
+            if (part != null && !part.isEmpty()) {
+                out.add(part);
+            }
+        }
+        return out;
+    }
+
+    private List<String> resolveLambdaCaptureNames(ASTNode lambdaNode) {
+        Set<String> used = new LinkedHashSet<>();
+        Set<String> declared = new LinkedHashSet<>();
+
+        ASTNode paramsNode = getChildOfType(lambdaNode, "PARAMS");
+        if (paramsNode != null) {
+            for (ASTNode param : paramsNode.getChildren()) {
+                String pName = getChildValue(param, "NAME");
+                if (pName != null) {
+                    declared.add(pName);
+                }
+            }
+        }
+
+        ASTNode bodyNode = getChildOfType(lambdaNode, "BODY");
+        if (bodyNode != null) {
+            collectDeclaredNames(bodyNode, declared);
+            collectIdentifierUsages(bodyNode, used);
+        }
+
+        List<String> captures = new ArrayList<>();
+        for (String name : used) {
+            if (declared.contains(name)) {
+                continue;
+            }
+            if (isResolvableCaptureName(name)) {
+                captures.add(name);
+            }
+        }
+        return captures;
+    }
+
+    private void collectDeclaredNames(ASTNode node, Set<String> declared) {
+        if (node == null) {
+            return;
+        }
+        if ("VAR_DECL".equals(node.getType())) {
+            String name = getChildValue(node, "NAME");
+            if (name != null) {
+                declared.add(name);
+            }
+        }
+        for (ASTNode child : node.getChildren()) {
+            collectDeclaredNames(child, declared);
+        }
+    }
+
+    private void collectIdentifierUsages(ASTNode node, Set<String> used) {
+        if (node == null) {
+            return;
+        }
+        if ("IDENTIFIER".equals(node.getType()) && node.getValue() != null) {
+            used.add(node.getValue());
+        }
+        for (ASTNode child : node.getChildren()) {
+            collectIdentifierUsages(child, used);
+        }
+    }
+
+    private boolean isResolvableCaptureName(String name) {
+        if (name == null) {
+            return false;
+        }
+        if (slotAllocator.slotOf(name) >= 0) {
+            return true;
+        }
+        if (methodVarTypes != null && methodVarTypes.containsKey(name)) {
+            return true;
+        }
+        if (currentClassName != null) {
+            Map<String, String> fields = classFieldTypes.get(currentClassName);
+            return fields != null && fields.containsKey(name);
+        }
+        return false;
+    }
+
+    private String inferCaptureJvmType(String name) {
+        if (name == null) {
+            return "Ljava/lang/Object;";
+        }
+        int slot = slotAllocator.slotOf(name);
+        if (slot >= 0) {
+            return normalizeJvmDescriptor(slotAllocator.typeOf(name), "Ljava/lang/Object;");
+        }
+        if (methodVarTypes != null && methodVarTypes.containsKey(name)) {
+            return normalizeJvmDescriptor(methodVarTypes.get(name), "Ljava/lang/Object;");
+        }
+        if (currentClassName != null) {
+            Map<String, String> fields = classFieldTypes.get(currentClassName);
+            if (fields != null && fields.containsKey(name)) {
+                return normalizeJvmDescriptor(fields.get(name), "Ljava/lang/Object;");
+            }
+        }
+        return "Ljava/lang/Object;";
+    }
+
+    private String materializeCaptureValueTemp(String name) {
+        int slot = slotAllocator.slotOf(name);
+        if (slot >= 0) {
+            String captureTemp = newTemp();
+            String jvmType = slotAllocator.typeOf(name);
+            emit(Instruction.typedLoad(typedLoadOpcode(jvmType), captureTemp, String.valueOf(slot)));
+            stackTracker.push(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
+            stackTracker.pop(jvmType.equals("J") || jvmType.equals("D") ? 2 : 1);
+            return captureTemp;
+        }
+
+        if (methodVarTypes != null && currentClassName != null) {
+            Map<String, String> fields = classFieldTypes.get(currentClassName);
+            if (fields != null && fields.containsKey(name)) {
+                String captureTemp = newTemp();
+                emit(Instruction.fieldLoad(captureTemp, "this", name));
+                stackTracker.push();
+                stackTracker.pop(1);
+                return captureTemp;
+            }
+        }
+
+        return name;
     }
 
     private void flushPendingLambdas() {
@@ -1256,17 +1435,17 @@ public class BytecodeGenerator {
 
         String rhs;
         if (!op.equals("=")) {
-            String lhsVal = addressOf(left);
+            // Compound assignments need the current LHS value, not its address/name.
+            String lhsVal = visit(left);
             String rhsVal = visit(right);
             String opStr = op.replace("=", "");
-            String lhsJvmType = slotAllocator.typeOf(left.getType().equals("IDENTIFIER")
-                    ? left.getValue()
-                    : "");
+            String lhsJvmType = inferNodeJvmType(left);
             rhs = newTemp();
             String reduced = tryStrengthReduce(rhs, lhsVal, opStr, rhsVal);
             if (reduced == null) {
                 Opcode binOp = resolveTypedBinaryOpcode(opStr, lhsJvmType);
                 emit(Instruction.binary(binOp, rhs, lhsVal, opStr, rhsVal));
+                stackTracker.pop(2);
                 stackTracker.push();
             }
             // Widen compound-op result to the target type if needed.
@@ -1442,21 +1621,24 @@ public class BytecodeGenerator {
                 break;
             }
             case "++": {
-                // FIX #3: addressOf does not push; only the const "1" is pushed (1 slot).
-                String addr = addressOf(operand);
+                // Prefix semantics: load the current value, then store the incremented result.
+                String original = visit(operand);
+                stackTracker.pop(1);
                 String one = newTemp();
                 emitSpecializedConst(one, "1", "I"); // pushes 1
-                emit(Instruction.binary(Opcode.IADD, result, addr, "+", one));
+                emit(Instruction.binary(Opcode.IADD, result, original, "+", one));
                 stackTracker.pop(1);
                 stackTracker.push(); // net: consume the "1", produce result
                 storeInto(operand, result);
                 break;
             }
             case "--": {
-                String addr = addressOf(operand);
+                // Prefix semantics: load the current value, then store the decremented result.
+                String original = visit(operand);
+                stackTracker.pop(1);
                 String one = newTemp();
                 emitSpecializedConst(one, "1", "I");
-                emit(Instruction.binary(Opcode.ISUB, result, addr, "-", one));
+                emit(Instruction.binary(Opcode.ISUB, result, original, "-", one));
                 stackTracker.pop(1);
                 stackTracker.push();
                 storeInto(operand, result);
@@ -1669,7 +1851,8 @@ public class BytecodeGenerator {
         }
         ASTNode args = getChildOfType(node, "ARGS");
         ASTNode methodDecl = getChildOfType(node, "METHOD_DECL");
-        boolean hasReceiver = receiver != null && ("RECEIVER".equals(receiver.getType()) ? !receiver.getChildren().isEmpty() : true);
+        boolean hasReceiver = receiver != null
+                && ("RECEIVER".equals(receiver.getType()) ? !receiver.getChildren().isEmpty() : true);
 
         boolean isStatic = false;
         String returnType = "void";
@@ -1815,6 +1998,13 @@ public class BytecodeGenerator {
                     emit(Instruction.typedStore(storeOpc, String.valueOf(slot), src));
                     // No stackTracker.pop: TAC stores are register→slot; the value
                     // temp was already accounted for by whoever computed it.
+                } else if (methodVarTypes != null && currentClassName != null) {
+                    Map<String, String> fields = classFieldTypes.get(currentClassName);
+                    if (fields != null && fields.containsKey(varName)) {
+                        emit(Instruction.fieldStore("this", varName, src));
+                    } else {
+                        emit(Instruction.copy(varName, src));
+                    }
                 } else {
                     emit(Instruction.copy(varName, src));
                 }
@@ -1831,9 +2021,17 @@ public class BytecodeGenerator {
             }
             case "FIELD_ACCESS": {
                 ASTNode recv = getChildOfType(left, "RECEIVER");
+                if (recv == null) {
+                    for (ASTNode child : left.getChildren()) {
+                        if (!"ARGS".equals(child.getType()) && !"METHOD_DECL".equals(child.getType())) {
+                            recv = child;
+                            break;
+                        }
+                    }
+                }
                 String obj = (recv != null && !recv.getChildren().isEmpty())
                         ? visit(recv.getChildren().get(0))
-                        : "this";
+                        : (recv != null ? visit(recv) : "this");
                 emit(Instruction.fieldStore(obj, left.getValue(), src));
                 // visit(receiver) pushed 1 (or 0 for "this" fallback).
                 if (recv != null && !recv.getChildren().isEmpty())

@@ -33,8 +33,13 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -50,6 +55,7 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
@@ -401,6 +407,20 @@ public class MainGUI2 extends JFrame {
     // Indentation settings (configurable)
     private int indentSize = 4;
     private boolean indentWithTabs = false;
+
+    // Editor autocomplete state
+    private final DefaultListModel<String> autoCompleteModel = new DefaultListModel<>();
+    private final JList<String> autoCompleteList = new JList<>(autoCompleteModel);
+    private final JPopupMenu autoCompletePopup = new JPopupMenu();
+    private boolean autoCompleteApplying = false;
+
+    private static final String[] AUTOCOMPLETE_KEYWORDS = {
+            "class", "interface", "enum", "public", "private", "protected", "static",
+            "void", "int", "double", "float", "boolean", "char", "long", "short", "byte", "String",
+            "var", "if", "else", "for", "while", "do", "switch", "case", "default",
+            "break", "continue", "return", "try", "catch", "throw", "new", "this", "super",
+            "true", "false", "null", "main", "println", "print", "System", "out"
+    };
 
     private String getIndentUnit() {
         if (indentWithTabs)
@@ -956,6 +976,7 @@ public class MainGUI2 extends JFrame {
 
         // Setup editor indentation behavior (Enter, Tab, Shift-Tab)
         setupEditorIndentation();
+        setupEditorAutocomplete();
 
         LineNumberComponent lnc = new LineNumberComponent(codeEditor, lineNumBg(), lineNumFg(), border(), indentSize,
                 indentWithTabs);
@@ -1216,6 +1237,10 @@ public class MainGUI2 extends JFrame {
         codeEditor.getActionMap().put("insert-newline-with-indent", new javax.swing.AbstractAction() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (isAutocompleteVisible()) {
+                    acceptAutocompleteSelection();
+                    return;
+                }
                 try {
                     StyledDocument doc = codeEditor.getStyledDocument();
                     int pos = codeEditor.getCaretPosition();
@@ -1249,6 +1274,10 @@ public class MainGUI2 extends JFrame {
         codeEditor.getActionMap().put("editor-indent", new javax.swing.AbstractAction() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (isAutocompleteVisible()) {
+                    acceptAutocompleteSelection();
+                    return;
+                }
                 try {
                     StyledDocument doc = codeEditor.getStyledDocument();
                     int selStart = codeEditor.getSelectionStart();
@@ -1347,6 +1376,250 @@ public class MainGUI2 extends JFrame {
                 applySyntaxHighlighting();
             }
         });
+    }
+
+    // ── Editor Autocomplete Support ───────────────────────────────────────
+    private void setupEditorAutocomplete() {
+        autoCompletePopup.removeAll();
+        autoCompletePopup.setFocusable(false);
+
+        autoCompleteList.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        autoCompleteList.setFont(FONT_MONO_SM);
+        autoCompleteList.setVisibleRowCount(8);
+
+        autoCompleteList.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    acceptAutocompleteSelection();
+                }
+            }
+        });
+
+        JScrollPane sc = new JScrollPane(autoCompleteList);
+        sc.setBorder(BorderFactory.createLineBorder(border()));
+        sc.setPreferredSize(new Dimension(260, 170));
+        autoCompletePopup.add(sc);
+
+        DocumentListener autoListener = new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                refreshAutocomplete(false);
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                refreshAutocomplete(false);
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+            }
+        };
+
+        codeEditor.getDocument().addDocumentListener(autoListener);
+        codeEditor.addPropertyChangeListener("document", e -> {
+            if (codeEditor.getDocument() != null) {
+                codeEditor.getDocument().addDocumentListener(autoListener);
+            }
+            hideAutocomplete();
+        });
+
+        codeEditor.addCaretListener(e -> {
+            if (autoCompleteApplying) {
+                return;
+            }
+            if (isAutocompleteVisible()) {
+                refreshAutocomplete(false);
+            }
+        });
+
+        // Ctrl+Space to force suggestions.
+        codeEditor.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("ctrl SPACE"), "editor-autocomplete-force");
+        codeEditor.getActionMap().put("editor-autocomplete-force", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                refreshAutocomplete(true);
+            }
+        });
+
+        codeEditor.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("UP"), "editor-autocomplete-up");
+        codeEditor.getActionMap().put("editor-autocomplete-up", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (isAutocompleteVisible()) {
+                    int idx = autoCompleteList.getSelectedIndex();
+                    if (idx > 0) {
+                        autoCompleteList.setSelectedIndex(idx - 1);
+                        autoCompleteList.ensureIndexIsVisible(idx - 1);
+                    }
+                } else {
+                    javax.swing.Action defaultUp = codeEditor.getActionMap()
+                            .get(javax.swing.text.DefaultEditorKit.upAction);
+                    if (defaultUp != null) {
+                        defaultUp.actionPerformed(e);
+                    }
+                }
+            }
+        });
+
+        codeEditor.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("DOWN"), "editor-autocomplete-down");
+        codeEditor.getActionMap().put("editor-autocomplete-down", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (isAutocompleteVisible()) {
+                    int idx = autoCompleteList.getSelectedIndex();
+                    int next = Math.min(autoCompleteModel.getSize() - 1, idx + 1);
+                    if (next >= 0) {
+                        autoCompleteList.setSelectedIndex(next);
+                        autoCompleteList.ensureIndexIsVisible(next);
+                    }
+                } else {
+                    javax.swing.Action defaultDown = codeEditor.getActionMap()
+                            .get(javax.swing.text.DefaultEditorKit.downAction);
+                    if (defaultDown != null) {
+                        defaultDown.actionPerformed(e);
+                    }
+                }
+            }
+        });
+
+        codeEditor.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("ESCAPE"), "editor-autocomplete-hide");
+        codeEditor.getActionMap().put("editor-autocomplete-hide", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (isAutocompleteVisible()) {
+                    hideAutocomplete();
+                }
+            }
+        });
+    }
+
+    private boolean isAutocompleteVisible() {
+        return autoCompletePopup.isVisible() && autoCompleteModel.getSize() > 0;
+    }
+
+    private void hideAutocomplete() {
+        autoCompletePopup.setVisible(false);
+    }
+
+    private void refreshAutocomplete(boolean forced) {
+        if (autoCompleteApplying || codeEditor == null) {
+            return;
+        }
+
+        String prefix = getCurrentWordPrefix();
+        if (!forced && (prefix == null || prefix.length() < 2)) {
+            hideAutocomplete();
+            return;
+        }
+
+        List<String> suggestions = collectAutocompleteSuggestions(prefix != null ? prefix : "");
+        if (suggestions.isEmpty()) {
+            hideAutocomplete();
+            return;
+        }
+
+        autoCompleteModel.clear();
+        for (String s : suggestions) {
+            autoCompleteModel.addElement(s);
+        }
+        autoCompleteList.setSelectedIndex(0);
+
+        try {
+            java.awt.geom.Rectangle2D r2 = codeEditor.modelToView2D(codeEditor.getCaretPosition());
+            if (r2 == null) {
+                hideAutocomplete();
+                return;
+            }
+            int px = (int) r2.getX();
+            int py = (int) (r2.getY() + r2.getHeight());
+            autoCompletePopup.show(codeEditor, px, py);
+            codeEditor.requestFocusInWindow();
+        } catch (BadLocationException ex) {
+            hideAutocomplete();
+        }
+    }
+
+    private String getCurrentWordPrefix() {
+        try {
+            int caret = codeEditor.getCaretPosition();
+            if (caret <= 0) {
+                return "";
+            }
+            String text = codeEditor.getDocument().getText(0, caret);
+            int i = text.length() - 1;
+            while (i >= 0) {
+                char c = text.charAt(i);
+                if (Character.isLetterOrDigit(c) || c == '_') {
+                    i--;
+                } else {
+                    break;
+                }
+            }
+            return text.substring(i + 1);
+        } catch (BadLocationException ex) {
+            return "";
+        }
+    }
+
+    private List<String> collectAutocompleteSuggestions(String prefix) {
+        Set<String> out = new LinkedHashSet<>();
+
+        for (String kw : AUTOCOMPLETE_KEYWORDS) {
+            if (prefix.isEmpty() || kw.startsWith(prefix)) {
+                out.add(kw);
+            }
+        }
+
+        try {
+            String text = codeEditor.getDocument().getText(0, codeEditor.getDocument().getLength());
+            Matcher m = Pattern.compile("\\b[A-Za-z_][A-Za-z0-9_]*\\b").matcher(text);
+            while (m.find()) {
+                String token = m.group();
+                if ((prefix.isEmpty() || token.startsWith(prefix)) && !token.equals(prefix)) {
+                    out.add(token);
+                }
+            }
+        } catch (BadLocationException ex) {
+        }
+
+        return new ArrayList<>(out).subList(0, Math.min(out.size(), 60));
+    }
+
+    private void acceptAutocompleteSelection() {
+        if (!isAutocompleteVisible()) {
+            return;
+        }
+
+        String selected = autoCompleteList.getSelectedValue();
+        if (selected == null || selected.isEmpty()) {
+            hideAutocomplete();
+            return;
+        }
+
+        String prefix = getCurrentWordPrefix();
+        if (prefix == null) {
+            prefix = "";
+        }
+
+        int caret = codeEditor.getCaretPosition();
+        int start = Math.max(0, caret - prefix.length());
+        try {
+            autoCompleteApplying = true;
+            StyledDocument doc = codeEditor.getStyledDocument();
+            if (caret > start) {
+                doc.remove(start, caret - start);
+            }
+            doc.insertString(start, selected, null);
+            codeEditor.setCaretPosition(start + selected.length());
+        } catch (BadLocationException ex) {
+        } finally {
+            autoCompleteApplying = false;
+            hideAutocomplete();
+        }
+
+        applySyntaxHighlighting();
     }
 
     private void addTabToOutput(int metaIdx, JPanel panel) {
