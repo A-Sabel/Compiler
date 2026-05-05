@@ -41,6 +41,7 @@
   - **Smart Error Detection:** Typo detection for type names (e.g., `nt` → suggests `int`)
     - Uses Levenshtein edit distance to suggest corrections
     - Edit distance threshold of 1 for accuracy
+  - **Generic Types Support:** Handles complex type arguments (`List<String>`) natively using JVM-compliant Type Erasure.
   - Error recovery and panic mode for graceful failure
   - Full type keyword support including `String` and user-defined types
 
@@ -94,6 +95,17 @@
   - **Unused Variable Detection:** Tracks declarations and usage to warn about dead variables.
   - **For-Each Loop Analysis:** Validates iterable collections and iterator types.
   - **Dead Code Detection:** Warns on unreachable code after `return`/`break`/`continue`.
+  - **Additional Warning Diagnostics:**
+    - Variable shadowing across nested scopes
+    - Self-assignment (`x = x`)
+    - Useless standalone expressions with no side effects
+    - Assignment used inside a condition
+    - Constant conditions in `if` / `while` / `for`
+    - Boolean literal comparisons that may be redundant
+    - Self-comparisons such as `x == x` / `x != x`
+    - Null comparisons that should be deliberate
+    - Broad exception catches and empty catch blocks
+    - Switch fallthrough warnings when a case lacks an explicit terminator
 - ✅ **Smart Error Suppression:** Sentinel Type Strategy (prevents "Double Jeopardy").
 - ✅ **Exception Type Checking:** Strictly enforces handled checked exceptions via `try-catch` blocks or `throws` method signatures.
 
@@ -123,7 +135,6 @@
 
 ## ⚠️ Out of Scope / Future Work
 
-- Generic types
 - Lambda expressions
 
 ---
@@ -142,6 +153,7 @@
 - Fixed ternary operator (`?`, `:`) parsing by recognizing them as `OPERATOR` tokens
 - Added `"String"` to recognized type keywords in `isTypeKeyword()`
 - Implemented intelligent type typo detection using Levenshtein edit distance
+- Added **Generic Types Support**, cleanly parsing and performing Type Erasure on constructs like `class Box<T>`, `List<String>`, and the diamond operator `<>`.
   - Example: `nt a = 10;` → suggests `int` with edit distance ≤ 1
 - Error recovery with panic mode for graceful failure handling
 
@@ -154,12 +166,25 @@
 - Enhanced ternary expression type checking and full variable scope tracking.
 - Refined Dead Code detection post-terminal statements (`return`, `break`, `continue`).
 - Implemented **Exception Type Checking** to strictly enforce handled checked exceptions (`try-catch` and `throws`).
+- Added a broader compiler warning pass covering shadowing, self-assignment, useless expressions, suspicious conditions, self-comparisons, null comparisons, broad catch blocks, empty catches, and switch fallthrough.
+
+### Warning Validation
+
+- Verified the warning set using a consolidated `.txt` source that triggers each diagnostic category.
+- Confirmed warnings emit with source line/column information and do not break the existing build or test suite.
+- Cleaned up temporary validation test sources after verification.
 
 ### Code Generation & Optimization
 
 - Finalized the `BytecodeGenerator` to output professional JVM-style bytecode.
 - Added Stack Map Frames and Exception Table generation for robust runtime verification.
 - Activated a full optimization pipeline: Constant Folding, Strength Reduction, CSE, DCE, and Peephole optimizations.
+
+### Recent Verification
+
+- Confirmed parser output for array-heavy control-flow programs matches the expected AST shape.
+- Verified array allocation, load, and store behavior through runtime execution.
+- Confirmed for-loop postfix updates, switch handling, and warning reporting all continue to work after the semantic analyzer changes.
 
 ---
 

@@ -34,6 +34,7 @@ import java.io.PrintStream;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -155,10 +156,6 @@ public class MainGUI2 extends JFrame {
     private static final Color LIST_SEL_DARK = new Color(0x37373D);
     private static final Color LIST_SEL_LIGHT = new Color(0xE8E8E8);
     private static final Color DIM_BORDER = new Color(0x444444); // inactive button border
-    // AST syntax-highlight colors
-    private static final Color AST_CONTROL = new Color(0xC586C0);
-    private static final Color AST_LITERAL = new Color(0xCE9178);
-    private static final Color AST_IDENTIFIER = new Color(0x9CDCFE);
     // macOS-style traffic-light dots
     private static final Color DOT_RED = new Color(0xFF5F56);
     private static final Color DOT_YELLOW = new Color(0xFFBD2E);
@@ -171,6 +168,43 @@ public class MainGUI2 extends JFrame {
     private static final Color WARNING_YELLOW = new Color(0xED6C02);
     private static final Color ERROR_RED = new Color(0xD32F2F);
     private static final Color INFO_BLUE = new Color(0x1976D2);
+
+    // ── Semantic Syntax Colors (VSCode Standard) ──────────────────────────────
+    private Color syntaxKeyword() {
+        return isDarkMode ? new Color(0x569CD6) : new Color(0x0000FF);
+    }
+
+    private Color syntaxControl() {
+        return isDarkMode ? new Color(0xC586C0) : new Color(0xAF00DB);
+    }
+
+    private Color syntaxType() {
+        return isDarkMode ? new Color(0x4EC9B0) : new Color(0x267F99);
+    }
+
+    private Color syntaxString() {
+        return isDarkMode ? new Color(0xCE9178) : new Color(0xA31515);
+    }
+
+    private Color syntaxNumber() {
+        return isDarkMode ? new Color(0xB5CEA8) : new Color(0x098658);
+    }
+
+    private Color syntaxMethod() {
+        return isDarkMode ? new Color(0xDCDCAA) : new Color(0x795E26);
+    }
+
+    private Color syntaxComment() {
+        return isDarkMode ? new Color(0x6A9955) : new Color(0x008000);
+    }
+
+    private Color syntaxVariable() {
+        return isDarkMode ? new Color(0x9CDCFE) : new Color(0x001080);
+    }
+
+    private Color syntaxAnnotation() {
+        return isDarkMode ? new Color(0xC586C0) : new Color(0x000000);
+    }
 
     private Color labelFg() {
         return isDarkMode ? D_ACCENT_BLACK : L_ACCENT_BLACK;
@@ -198,20 +232,18 @@ public class MainGUI2 extends JFrame {
         Color b = bg();
         int offset = isDarkMode ? 7 : -6;
         return new Color(
-            Math.max(0, Math.min(255, b.getRed() + offset)),
-            Math.max(0, Math.min(255, b.getGreen() + offset)),
-            Math.max(0, Math.min(255, b.getBlue() + offset))
-        );
+                Math.max(0, Math.min(255, b.getRed() + offset)),
+                Math.max(0, Math.min(255, b.getGreen() + offset)),
+                Math.max(0, Math.min(255, b.getBlue() + offset)));
     }
 
     private Color bgPanel() {
         Color b = bgLight();
         int offset = isDarkMode ? 7 : -6;
         return new Color(
-            Math.max(0, Math.min(255, b.getRed() + offset)),
-            Math.max(0, Math.min(255, b.getGreen() + offset)),
-            Math.max(0, Math.min(255, b.getBlue() + offset))
-        );
+                Math.max(0, Math.min(255, b.getRed() + offset)),
+                Math.max(0, Math.min(255, b.getGreen() + offset)),
+                Math.max(0, Math.min(255, b.getBlue() + offset)));
     }
 
     private Color headerBg() {
@@ -356,7 +388,11 @@ public class MainGUI2 extends JFrame {
     private int errorCount = 0;
     private int warnCount = 0;
     private int currentFontSize = 13;
-    private enum Theme { BLUE, PINK, VIOLET, RED }
+
+    private enum Theme {
+        BLUE, PINK, VIOLET, RED
+    }
+
     private boolean isAutoSaveEnabled = false;
     private static final String AUTOSAVE_FILE = "autosave_backup.java";
     private Theme currentTheme = Theme.BLUE;
@@ -421,7 +457,8 @@ public class MainGUI2 extends JFrame {
             if (backup.exists()) {
                 try (BufferedReader br = new BufferedReader(new FileReader(backup))) {
                     codeEditor.read(br, null);
-                } catch (IOException ignored) {}
+                } catch (IOException ignored) {
+                }
             } else {
                 codeEditor.setText("//input code here\n");
             }
@@ -458,7 +495,7 @@ public class MainGUI2 extends JFrame {
             protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g;
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                GradientPaint gp = new GradientPaint(0, 0, themeColor(), getWidth(), getHeight(), 
+                GradientPaint gp = new GradientPaint(0, 0, themeColor(), getWidth(), getHeight(),
                         isDarkMode ? themeColor().darker() : themeColor().brighter());
                 g2.setPaint(gp);
                 g2.fillRoundRect(0, 0, getWidth(), getHeight(), 6, 6);
@@ -808,19 +845,8 @@ public class MainGUI2 extends JFrame {
         codeEditor.setSelectionColor(isDarkMode ? EDITOR_SEL_DARK : EDITOR_SEL_LIGHT);
         codeEditor.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
 
-        // Set Tab Size for JTextPane (equivalent to 4 spaces)
-        StyleContext sc = StyleContext.getDefaultStyleContext();
-        javax.swing.text.TabSet tabSet = new javax.swing.text.TabSet(new javax.swing.text.TabStop[] {
-                new javax.swing.text.TabStop(28), new javax.swing.text.TabStop(56),
-                new javax.swing.text.TabStop(84), new javax.swing.text.TabStop(112),
-                new javax.swing.text.TabStop(140), new javax.swing.text.TabStop(168)
-        });
-        javax.swing.text.AttributeSet paraSet = sc.addAttribute(SimpleAttributeSet.EMPTY, StyleConstants.TabSet,
-                tabSet);
-        codeEditor.setParagraphAttributes(paraSet, false);
-
         // Real-time syntax highlighting listener
-        codeEditor.getDocument().addDocumentListener(new DocumentListener() {
+        DocumentListener syntaxListener = new DocumentListener() {
             public void insertUpdate(DocumentEvent e) {
                 applySyntaxHighlighting();
                 performAutoSave();
@@ -833,6 +859,29 @@ public class MainGUI2 extends JFrame {
 
             public void changedUpdate(DocumentEvent e) {
             } // Ignore attribute styling changes
+        };
+
+        Runnable applyEditorStyles = () -> {
+            // Set Tab Size for JTextPane (equivalent to 4 spaces)
+            StyleContext sc = StyleContext.getDefaultStyleContext();
+            javax.swing.text.TabSet tabSet = new javax.swing.text.TabSet(new javax.swing.text.TabStop[] {
+                    new javax.swing.text.TabStop(28), new javax.swing.text.TabStop(56),
+                    new javax.swing.text.TabStop(84), new javax.swing.text.TabStop(112),
+                    new javax.swing.text.TabStop(140), new javax.swing.text.TabStop(168)
+            });
+            javax.swing.text.AttributeSet paraSet = sc.addAttribute(SimpleAttributeSet.EMPTY, StyleConstants.TabSet,
+                    tabSet);
+            codeEditor.setParagraphAttributes(paraSet, false);
+            codeEditor.getDocument().addDocumentListener(syntaxListener);
+        };
+
+        applyEditorStyles.run();
+
+        // JTextPane.setText() creates a NEW Document. Catch this to keep coloring
+        // alive.
+        codeEditor.addPropertyChangeListener("document", e -> {
+            applyEditorStyles.run();
+            applySyntaxHighlighting();
         });
 
         codeEditor.addCaretListener(e -> {
@@ -873,25 +922,32 @@ public class MainGUI2 extends JFrame {
                 StyleConstants.setFontSize(defaultAttr, currentFontSize);
                 doc.setCharacterAttributes(0, text.length(), defaultAttr, true);
 
-                // 2. Methods (Matched before keywords to avoid overlapping) -> Gold
-                highlightRegex(text, doc, "\\b([a-zA-Z_]\\w*)\\s*(?=\\()", GOLD);
+                // 2. Comments first (lowest visual priority)
+                highlightRegex(text, doc, "//[^\r\n]*|/\\*.*?\\*/", syntaxComment());
 
-                // 3. Types and Keywords -> Java Blue & Control Flow Purple
-                highlightRegex(text, doc,
-                        "\\b(int|double|float|boolean|char|void|var|String|class|public|private|protected|static|new)\\b",
-                        JAVA_BLUE);
+                // 3. Strings and numbers
+                highlightRegex(text, doc, "\"([^\"]|\\\\\")*\"", syntaxString());
+                highlightRegex(text, doc, "\\b\\d+(\\.\\d+)?\\b", syntaxNumber());
+
+                // 4. Annotations
+                highlightRegex(text, doc, "@[a-zA-Z_]\\w*", syntaxAnnotation());
+
+                // 5. Control-flow and language keywords
                 highlightRegex(text, doc,
                         "\\b(if|else|while|for|do|break|continue|return|try|catch|throw|switch|case|default)\\b",
-                        AST_CONTROL);
+                        syntaxControl());
+                highlightRegex(text, doc,
+                        "\\b(class|public|private|protected|static|new|interface|enum|extends|implements|this|super)\\b",
+                        syntaxKeyword());
+                highlightRegex(text, doc,
+                        "\\b(int|double|float|boolean|char|void|var|String|long|short|byte)\\b",
+                        syntaxType());
 
-                // 4. Numbers -> Literal Orange
-                highlightRegex(text, doc, "\\b\\d+(\\.\\d+)?\\b", AST_LITERAL);
-
-                // 5. Strings -> Literal Orange
-                highlightRegex(text, doc, "\"([^\"]|\\\\\")*\"", AST_LITERAL);
-
-                // 6. Comments -> Muted Grey
-                highlightRegex(text, doc, "//[^\r\n]*|/\\*.*?\\*/", MUTED_FG);
+                // 6. Declarations and method calls (kept minimal to avoid noisy colors)
+                highlightRegex(text, doc, "\\b(class|interface|enum)\\s+([A-Z_]\\w*)\\b", syntaxType());
+                highlightRegex(text, doc,
+                        "\\b(?!if\\b|else\\b|while\\b|for\\b|switch\\b|catch\\b|return\\b|new\\b)([a-zA-Z_]\\w*)\\s*(?=\\()",
+                        syntaxMethod());
             } catch (Exception ignored) {
             }
         });
@@ -1303,20 +1359,31 @@ public class MainGUI2 extends JFrame {
                 setBorderSelectionColor(selectionBg());
 
                 String text = value.toString();
+                String normalized = text.toUpperCase(Locale.ROOT);
                 if (!sel) {
-                    if (text.startsWith("Program") || text.startsWith("Method") || text.startsWith("Function")) {
+                    if (normalized.startsWith("PROGRAM") || normalized.startsWith("CLASS_DECL")
+                            || normalized.startsWith("METHOD_DECL") || normalized.startsWith("FUNCTION")) {
                         setForeground(SUCCESS_GREEN);
-                    } else if (text.startsWith("If") || text.startsWith("While") || text.startsWith("For")
-                            || text.startsWith("Return")) {
-                        setForeground(AST_CONTROL);
-                    } else if (text.startsWith("Assign") || text.startsWith("VarDecl")) {
-                        setForeground(INFO_BLUE);
-                    } else if (text.startsWith("BinaryOp") || text.startsWith("UnaryOp")) {
+                    } else if (normalized.startsWith("IF") || normalized.startsWith("WHILE")
+                            || normalized.startsWith("FOR") || normalized.startsWith("RETURN")
+                            || normalized.startsWith("SWITCH") || normalized.startsWith("CASE")
+                            || normalized.startsWith("DEFAULT") || normalized.startsWith("TRY")
+                            || normalized.startsWith("CATCH") || normalized.startsWith("THROW")) {
+                        setForeground(syntaxControl());
+                    } else if (normalized.startsWith("ASSIGN") || normalized.startsWith("VAR_DECL")) {
+                        setForeground(syntaxKeyword());
+                    } else if (normalized.startsWith("BINARY_OP") || normalized.startsWith("UNARY_OP")
+                            || normalized.startsWith("POSTFIX_OP")) {
                         setForeground(WARNING_YELLOW);
-                    } else if (text.startsWith("Literal") || text.startsWith("Number") || text.startsWith("String")) {
-                        setForeground(AST_LITERAL);
-                    } else if (text.startsWith("Identifier") || text.startsWith("Var")) {
-                        setForeground(AST_IDENTIFIER);
+                    } else if (normalized.startsWith("LITERAL") || normalized.startsWith("STRING")
+                            || normalized.startsWith("BOOLEAN_LITERAL")
+                            || normalized.startsWith("NULL_LITERAL") || normalized.startsWith("CHAR")) {
+                        setForeground(syntaxString());
+                    } else if (normalized.startsWith("NUMBER")) {
+                        setForeground(syntaxNumber());
+                    } else if (normalized.startsWith("IDENTIFIER") || normalized.startsWith("NAME")
+                            || normalized.startsWith("TYPE")) {
+                        setForeground(syntaxVariable());
                     }
                 }
 
@@ -1934,15 +2001,20 @@ public class MainGUI2 extends JFrame {
         content.add(themeTitle);
         content.add(Box.createVerticalStrut(10));
 
-        String[] themes = {"Blue Theme", "Pink Theme", "Violet Theme", "Red Theme"};
+        String[] themes = { "Blue Theme", "Pink Theme", "Violet Theme", "Red Theme" };
         JComboBox<String> themeBox = new JComboBox<>(themes);
-        themeBox.setSelectedItem(currentTheme.toString().charAt(0) + currentTheme.toString().substring(1).toLowerCase() + " Theme");
+        themeBox.setSelectedItem(
+                currentTheme.toString().charAt(0) + currentTheme.toString().substring(1).toLowerCase() + " Theme");
         themeBox.addActionListener(e -> {
             String selected = (String) themeBox.getSelectedItem();
-            if (selected.contains("Pink")) currentTheme = Theme.PINK;
-            else if (selected.contains("Violet")) currentTheme = Theme.VIOLET;
-            else if (selected.contains("Red")) currentTheme = Theme.RED;
-            else currentTheme = Theme.BLUE;
+            if (selected.contains("Pink"))
+                currentTheme = Theme.PINK;
+            else if (selected.contains("Violet"))
+                currentTheme = Theme.VIOLET;
+            else if (selected.contains("Red"))
+                currentTheme = Theme.RED;
+            else
+                currentTheme = Theme.BLUE;
             applyTheme();
         });
         content.add(themeBox);
@@ -1953,10 +2025,11 @@ public class MainGUI2 extends JFrame {
         autoSaveTitle.setForeground(labelFg());
         content.add(autoSaveTitle);
         content.add(Box.createVerticalStrut(10));
-        
+
         content.add(createSettingsCheckbox("Enable Auto-Save", isAutoSaveEnabled, e -> {
             isAutoSaveEnabled = ((JCheckBox) e.getSource()).isSelected();
-            if (isAutoSaveEnabled) performAutoSave();
+            if (isAutoSaveEnabled)
+                performAutoSave();
         }));
 
         content.add(Box.createVerticalStrut(25));
@@ -1970,7 +2043,7 @@ public class MainGUI2 extends JFrame {
             isAutoSaveEnabled = false;
             showConsoleTab = showErrorsTab = showWarningsTab = true;
             showRuntimeTab = showSymbolTab = showGeneratedTab = true;
-            
+
             // Refresh UI and Close Dialog
             applyTheme();
             dialog.dispose();
@@ -2003,12 +2076,14 @@ public class MainGUI2 extends JFrame {
     }
 
     private void performAutoSave() {
-        if (!isAutoSaveEnabled || codeEditor == null) return;
+        if (!isAutoSaveEnabled || codeEditor == null)
+            return;
         // Save to temporary file in a separate thread to keep UI smooth
         new Thread(() -> {
             try (FileWriter fw = new FileWriter(AUTOSAVE_FILE)) {
                 fw.write(codeEditor.getText());
-            } catch (IOException ignored) {}
+            } catch (IOException ignored) {
+            }
         }).start();
     }
 
@@ -2032,7 +2107,7 @@ public class MainGUI2 extends JFrame {
         if (codeEditor != null) {
             codeEditor.setFont(newMono);
             applySyntaxHighlighting();
-            
+
             // Update Line Numbers by finding the scroll pane
             if (codeEditor.getParent() != null && codeEditor.getParent().getParent() instanceof JScrollPane) {
                 JScrollPane sp = (JScrollPane) codeEditor.getParent().getParent();
@@ -2045,12 +2120,17 @@ public class MainGUI2 extends JFrame {
             }
         }
 
-        if (consolePane != null) consolePane.setFont(newMonoSm);
-        if (runtimeArea != null) runtimeArea.setFont(newMonoSm);
-        if (astTree != null) astTree.setFont(newMonoSm);
-        if (errorList != null) errorList.setFont(newMonoSm);
-        if (warningList != null) warningList.setFont(newMonoSm);
-        
+        if (consolePane != null)
+            consolePane.setFont(newMonoSm);
+        if (runtimeArea != null)
+            runtimeArea.setFont(newMonoSm);
+        if (astTree != null)
+            astTree.setFont(newMonoSm);
+        if (errorList != null)
+            errorList.setFont(newMonoSm);
+        if (warningList != null)
+            warningList.setFont(newMonoSm);
+
         if (generatedCodeTable != null) {
             generatedCodeTable.setFont(newMonoSm);
             generatedCodeTable.setRowHeight(effectiveSize + 10);
@@ -2458,7 +2538,8 @@ public class MainGUI2 extends JFrame {
             setBackground(bg);
             setForeground(fg);
             setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, border));
-            tp.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+
+            javax.swing.event.DocumentListener dl = new javax.swing.event.DocumentListener() {
                 public void insertUpdate(javax.swing.event.DocumentEvent e) {
                     repaint();
                 }
@@ -2471,6 +2552,15 @@ public class MainGUI2 extends JFrame {
                     repaint();
                     revalidate();
                 }
+            };
+
+            tp.getDocument().addDocumentListener(dl);
+            tp.addPropertyChangeListener("document", e -> {
+                javax.swing.text.Document doc = (javax.swing.text.Document) e.getNewValue();
+                if (doc != null)
+                    doc.addDocumentListener(dl);
+                repaint();
+                revalidate();
             });
         }
 

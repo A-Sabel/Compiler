@@ -149,22 +149,7 @@ public class SemanticAnalyzer {
                 break;
 
             case "FOR":
-                symbolTable.enterScope();
-                loopDepth++;
-                validateBooleanCondition(node);
-                for (ASTNode child : node.getChildren()) {
-                    if (child.getType().equals("UPDATE") && !child.getChildren().isEmpty()) {
-                        ASTNode updateList = child.getChildren().get(0);
-                        if (updateList.getType().equals("UPDATE_LIST")) {
-                            for (ASTNode expr : updateList.getChildren()) {
-                                inferExpressionType(expr);
-                            }
-                        }
-                    }
-                }
-                analyzeChildren(node);
-                loopDepth--;
-                symbolTable.exitScope();
+                analyzeForStatement(node);
                 break;
 
             case "FOR_EACH":
@@ -427,6 +412,61 @@ public class SemanticAnalyzer {
         // Analyze loop body
         if (bodyNode != null) {
             analyze(bodyNode);
+        }
+
+        loopDepth--;
+        symbolTable.exitScope();
+    }
+
+    /**
+     * Analyzes a standard for-loop in source order so the initializer is in scope
+     * before the condition and update expressions are checked.
+     */
+    private void analyzeForStatement(ASTNode node) {
+        symbolTable.enterScope();
+        loopDepth++;
+
+        ASTNode initNode = null;
+        ASTNode conditionNode = null;
+        ASTNode updateNode = null;
+        ASTNode bodyNode = null;
+
+        for (ASTNode child : node.getChildren()) {
+            switch (child.getType()) {
+                case "INIT":
+                    initNode = child;
+                    break;
+                case "CONDITION":
+                    conditionNode = child;
+                    break;
+                case "UPDATE":
+                    updateNode = child;
+                    break;
+                case "BODY":
+                    bodyNode = child;
+                    break;
+            }
+        }
+
+        if (initNode != null && !initNode.getChildren().isEmpty()) {
+            analyze(initNode.getChildren().get(0));
+        }
+
+        if (conditionNode != null && !conditionNode.getChildren().isEmpty()) {
+            validateBooleanCondition(node);
+        }
+
+        if (updateNode != null && !updateNode.getChildren().isEmpty()) {
+            ASTNode updateList = updateNode.getChildren().get(0);
+            if (updateList != null && updateList.getType().equals("UPDATE_LIST")) {
+                for (ASTNode expr : updateList.getChildren()) {
+                    inferExpressionType(expr);
+                }
+            }
+        }
+
+        if (bodyNode != null && !bodyNode.getChildren().isEmpty()) {
+            analyze(bodyNode.getChildren().get(0));
         }
 
         loopDepth--;

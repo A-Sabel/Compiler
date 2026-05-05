@@ -97,6 +97,7 @@ public class Parser {
         Tokens returnTypeToken = current(); // Capture for RETURN_TYPE node
         StringBuilder returnTypeSB = new StringBuilder(currentLexeme());
         advance(); // consume base return type
+        parseGenericTypeParams(); // TYPE ERASURE: Discard generics from the AST
         if (check("SPECIAL_CHAR", "[")) {
             returnTypeSB.append(currentLexeme());
             advance(); // consume '['
@@ -132,6 +133,7 @@ public class Parser {
                 if (isTypeKeyword() || "IDENTIFIER".equals(currentType())) {
                     StringBuilder fullType = new StringBuilder(currentLexeme());
                     advance(); // Consume base type
+                    parseGenericTypeParams(); // TYPE ERASURE
 
                     // Array support: String[]
                     if (check("SPECIAL_CHAR", "[")) {
@@ -643,6 +645,7 @@ public class Parser {
         Tokens typeToken = current();
         StringBuilder fullType = new StringBuilder(currentLexeme());
         advance();
+        parseGenericTypeParams(); // TYPE ERASURE: Discard generics from the AST
 
         // Array type: String[]
         if (check("SPECIAL_CHAR", "[")) {
@@ -941,6 +944,7 @@ public class Parser {
             advance(); // consume 'new'
             String typeName = currentLexeme();
             advance(); // consume type / class name
+            parseGenericTypeParams(); // TYPE ERASURE: E.g., ArrayList<String>() -> ArrayList()
 
             // Array instantiation: new int[5]
             if (check("SPECIAL_CHAR", "[")) {
@@ -1131,6 +1135,7 @@ public class Parser {
         consume("KEYWORD", "class");
         String className = currentLexeme();
         consume("IDENTIFIER", className);
+        parseGenericTypeParams(); // TYPE ERASURE: E.g., class Box<T> -> class Box
 
         ASTNode classNode = ASTNode.of("CLASS_DECL", className,
                 startToken.getLine(), startToken.getColumn());
@@ -1184,6 +1189,31 @@ public class Parser {
     // ═════════════════════════════════════════════════════════════════════════
     // HELPER / UTILITY METHODS
     // ═════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Safely parses and consumes Generic Type Parameters `<...>` for Type Erasure.
+     * Handles nested generics like `Map<String, List<Integer>>` gracefully.
+     */
+    private String parseGenericTypeParams() {
+        if (!check("OPERATOR", "<")) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append(currentLexeme());
+        advance(); // consume '<'
+        int depth = 1;
+        
+        while (!isAtEnd() && depth > 0) {
+            String lex = currentLexeme();
+            sb.append(lex);
+            
+            if (lex.equals("<")) depth++;
+            else if (lex.equals(">")) depth--;
+            else if (lex.equals(">>")) depth -= 2;
+            else if (lex.equals(">>>")) depth -= 3;
+            
+            advance();
+        }
+        return sb.toString();
+    }
 
     private boolean isMethodStart() {
         // Case 1: starts with a modifier (public, private, static, protected)
@@ -1394,6 +1424,8 @@ public class Parser {
     /**
      * Returns true when two consecutive IDENTIFIERs appear, suggesting a misspelled
      * type.
+     * Checks if two consecutive IDENTIFIERs appear, suggesting a misspelled type.
+     * (Ensures no stray braces exist before this method)
      */
     private boolean isPotentialTypeTypo() {
         Tokens current = current();
