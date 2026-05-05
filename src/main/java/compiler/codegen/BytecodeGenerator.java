@@ -309,6 +309,15 @@ public class BytecodeGenerator {
             }
             case "NEW":
                 return "L" + node.getValue().replace('.', '/') + ";";
+            case "ARRAY_LITERAL": {
+                String arrayReturnType = node.getAttribute("resolved_return_type");
+                if (arrayReturnType != null && !arrayReturnType.isBlank())
+                    return toJvmDescriptor(arrayReturnType);
+                if (node.getChildren().isEmpty())
+                    return "[Ljava/lang/Object;";
+                String elemType = inferNodeJvmType(node.getChildren().get(0));
+                return "[" + normalizeJvmDescriptor(elemType);
+            }
             case "BINARY_OP": {
                 if ("+".equals(node.getValue())) {
                     if (inferNodeJvmType(node.getChildren().get(0)).equals("Ljava/lang/String;") ||
@@ -777,6 +786,8 @@ public class BytecodeGenerator {
                 return handleNew(node);
             case "NEW_ARRAY":
                 return handleNewArray(node);
+            case "ARRAY_LITERAL":
+                return handleArrayLiteral(node);
             case "ARRAY_ACCESS":
                 return handleArrayAccess(node);
             case "METHOD_CALL":
@@ -1147,7 +1158,11 @@ public class BytecodeGenerator {
         String prevBreak = currentBreakLabel;
         currentBreakLabel = endLabel;
 
-        String switchVal = visit(node.getChildren().get(0));
+        ASTNode switchExpr = getChildOfType(node, "EXPR");
+        if (switchExpr == null)
+            throw new RuntimeException("Malformed switch statement: missing switch expression");
+
+        String switchVal = visit(switchExpr);
         stackTracker.pop(1);
 
         ASTNode casesNode = getChildOfType(node, "CASES");
@@ -1156,16 +1171,14 @@ public class BytecodeGenerator {
             List<String> caseLabels = new ArrayList<>();
             String defaultLabel = endLabel;
 
-            for (int i = 0; i < cases.size(); i++) {
-                ASTNode c = cases.get(i);
+            for (ASTNode c : cases) {
                 String lbl = newLabel("CASE");
                 caseLabels.add(lbl);
                 if (c.getType().equals("DEFAULT")) {
                     defaultLabel = lbl;
                 } else {
-                    // Evaluate case expression
                     String caseVal = visit(c.getChildren().get(0));
-                    stackTracker.push(); // Conceptually push switchVal for the EQUAL comparison
+                    stackTracker.push(); // account for the switch value in the comparison
                     String cmp = newTemp();
                     emit(Instruction.binary(Opcode.EQUAL, cmp, switchVal, "==", caseVal));
                     stackTracker.pop(2);
@@ -1174,6 +1187,7 @@ public class BytecodeGenerator {
                     stackTracker.pop(1);
                 }
             }
+
             emit(Instruction.jump(defaultLabel));
 
             for (int i = 0; i < cases.size(); i++) {
@@ -1181,9 +1195,10 @@ public class BytecodeGenerator {
                 emit(Instruction.label(caseLabels.get(i)));
                 unreachable = false;
                 ASTNode body = getChildOfType(cases.get(i), "CASE_BODY");
-                if (body != null)
+                if (body != null) {
                     for (ASTNode s : body.getChildren())
                         visit(s);
+                }
             }
         }
 
@@ -1524,6 +1539,78 @@ public class BytecodeGenerator {
         emit(Instruction.newArray(result, baseType, size));
         stackTracker.push();
         return result;
+    }
+
+    private String handleArrayLiteral(ASTNode node) {
+        String resolvedReturnType = node.getAttribute("resolved_return_type");
+        String arrayType = resolvedReturnType != null && !resolvedReturnType.isBlank()
+                ? resolvedReturnType
+                : inferArrayLiteralType(node);
+        String baseType = arrayType.endsWith("[]") ? arrayType.substring(0, arrayType.length() - 2) : arrayType;
+
+        int length = node.getChildren().size();
+        String sizeConst = newTemp();
+        emitSpecializedConst(sizeConst, String.valueOf(length), "I");
+
+        String arrayRef = newTemp();
+        emit(Instruction.newArray(arrayRef, baseType, sizeConst));
+        stackTracker.pop(1); // consume the size constant
+        stackTracker.push(); // push the array reference
+
+        for (int i = 0; i < length; i++) {
+            String indexTemp = newTemp();
+            emitSpecializedConst(indexTemp, String.valueOf(i), "I");
+            String elementValue = visit(node.getChildren().get(i));
+            emit(Instruction.arrayStore(arrayRef, indexTemp, elementValue));
+            stackTracker.pop(2); // consume base + index
+        }
+
+        return arrayRef;
+    }
+
+    private String inferArrayLiteralType(ASTNode node) {
+        if (node.getChildren().isEmpty())
+            return "Object[]";
+        String elemJvmType = inferNodeJvmType(node.getChildren().get(0));
+        String elementSourceType = jvmDescriptorToSourceType(normalizeJvmDescriptor(elemJvmType));
+        return elementSourceType + "[]";
+    }
+
+    private String jvmDescriptorToSourceType(String desc) {
+        if (desc == null || desc.isBlank())
+            return "Object";
+        if (desc.startsWith("[")) {
+            int dims = 0;
+            while (dims < desc.length() && desc.charAt(dims) == '[') {
+                dims++;
+            }
+            String elementDesc = desc.substring(dims);
+            String elementSource = jvmDescriptorToSourceType(elementDesc);
+            return elementSource + "[]".repeat(Math.max(0, dims));
+        }
+        switch (desc) {
+            case "I":
+                return "int";
+            case "J":
+                return "long";
+            case "F":
+                return "float";
+            case "D":
+                return "double";
+            case "Z":
+                return "boolean";
+            case "B":
+                return "byte";
+            case "C":
+                return "char";
+            case "S":
+                return "short";
+            default:
+                if (desc.startsWith("L") && desc.endsWith(";")) {
+                    return desc.substring(1, desc.length() - 1).replace('/', '.');
+                }
+                return "Object";
+        }
     }
 
     private String handleArrayAccess(ASTNode node) {

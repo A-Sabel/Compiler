@@ -104,7 +104,7 @@ public class SemanticAnalyzer {
 
                     // Warn about unused expressions (expressions without side effects)
                     if (isUselessExpression(expr)) {
-                        ErrorHandler.report(
+                        ErrorHandler.reportWarning(
                                 "Warning: Statement has no effect. This expression does nothing.",
                                 expr.getLine(), expr.getColumn());
                     }
@@ -231,14 +231,14 @@ public class SemanticAnalyzer {
                 }
 
                 if (isOverbroadExceptionType(type)) {
-                    ErrorHandler.report(
+                    ErrorHandler.reportWarning(
                             "Warning: Catching broad exception type '" + type + "' may hide bugs.",
                             c.getLine(), c.getColumn());
                 }
             }
 
             if (isEmptyCatchBody(catchBody)) {
-                ErrorHandler.report(
+                ErrorHandler.reportWarning(
                         "Warning: Empty catch block. Consider handling or rethrowing the exception.",
                         c.getLine(), c.getColumn());
             }
@@ -311,7 +311,7 @@ public class SemanticAnalyzer {
             }
 
             if (hasNextBranch) {
-                ErrorHandler.report(
+                ErrorHandler.reportWarning(
                         "Warning: Possible switch fallthrough. Add break, return, or throw if intentional.",
                         lastStmt.getLine(), lastStmt.getColumn());
             }
@@ -502,7 +502,7 @@ public class SemanticAnalyzer {
 
         // Variable shadowing check (warning only, not an error)
         if (symbolTable.isDeclaredInOuterScope(name)) {
-            ErrorHandler.report(
+            ErrorHandler.reportWarning(
                     "Warning: Variable '" + name + "' shadows a variable from an outer scope.",
                     nameNode.getLine(), nameNode.getColumn());
         }
@@ -739,7 +739,7 @@ public class SemanticAnalyzer {
         String rhsType = inferExpressionType(rhs);
 
         if (isSelfAssignment(lhs, rhs)) {
-            ErrorHandler.report(
+            ErrorHandler.reportWarning(
                     "Warning: Self-assignment has no effect.",
                     node.getLine(), node.getColumn());
         }
@@ -814,7 +814,7 @@ public class SemanticAnalyzer {
                         && (isBooleanLiteralNode(leftNode) || isBooleanLiteralNode(rightNode))) {
                     if (expr.getAttribute("warned_bool_literal_compare") == null) {
                         expr.setAttribute("warned_bool_literal_compare", "true");
-                        ErrorHandler.report(
+                        ErrorHandler.reportWarning(
                                 "Warning: Comparison with a boolean literal may be redundant.",
                                 getFallbackLine(expr, leftNode, rightNode),
                                 getFallbackColumn(expr, leftNode, rightNode));
@@ -825,7 +825,7 @@ public class SemanticAnalyzer {
                         && (isNullLiteralNode(leftNode) || isNullLiteralNode(rightNode))) {
                     if (expr.getAttribute("warned_null_compare") == null) {
                         expr.setAttribute("warned_null_compare", "true");
-                        ErrorHandler.report(
+                        ErrorHandler.reportWarning(
                                 "Warning: Null comparison should be deliberate; consider an explicit null check.",
                                 getFallbackLine(expr, leftNode, rightNode),
                                 getFallbackColumn(expr, leftNode, rightNode));
@@ -844,7 +844,7 @@ public class SemanticAnalyzer {
                 if ((op.equals("==") || op.equals("!=")) && isSameExpression(leftNode, rightNode)
                         && expr.getAttribute("warned_self_compare") == null) {
                     expr.setAttribute("warned_self_compare", "true");
-                    ErrorHandler.report(
+                    ErrorHandler.reportWarning(
                             "Warning: Comparing an expression with itself is usually redundant.",
                             getFallbackLine(expr, leftNode, rightNode),
                             getFallbackColumn(expr, leftNode, rightNode));
@@ -1393,7 +1393,7 @@ public class SemanticAnalyzer {
             String varName = entry.getKey();
             if (!used.contains(varName)) {
                 VarInfo info = entry.getValue();
-                ErrorHandler.report(
+                ErrorHandler.reportWarning(
                         "Warning: Variable '" + varName + "' is declared but never used.",
                         info.line, info.column);
             }
@@ -1415,13 +1415,13 @@ public class SemanticAnalyzer {
 
                 // Check for suspicious assignment in condition
                 if (expression.getType().equals("ASSIGN")) {
-                    ErrorHandler.report(
+                    ErrorHandler.reportWarning(
                             "Warning: Assignment in condition. Did you mean to use == instead of =?",
                             expression.getLine(), expression.getColumn());
                 }
 
                 if (isConstantCondition(expression)) {
-                    ErrorHandler.report(
+                    ErrorHandler.reportWarning(
                             "Warning: Condition is constant and may make the branch or loop unnecessary.",
                             expression.getLine(), expression.getColumn());
                 }

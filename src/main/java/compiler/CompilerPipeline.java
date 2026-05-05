@@ -21,17 +21,20 @@ public final class CompilerPipeline {
         public final ASTNode optimizedAst;
         public final List<Instruction> instructions;
         public final List<String> errors;
+        public final List<String> warnings;
 
         private CompileResult(List<Tokens> tokens,
                               ASTNode parsedAst,
                               ASTNode optimizedAst,
                               List<Instruction> instructions,
-                              List<String> errors) {
+                              List<String> errors,
+                              List<String> warnings) {
             this.tokens = tokens;
             this.parsedAst = parsedAst;
             this.optimizedAst = optimizedAst;
             this.instructions = instructions;
             this.errors = errors;
+            this.warnings = warnings;
         }
 
         public boolean hasErrors() {
@@ -63,7 +66,8 @@ public final class CompilerPipeline {
                 parsedAst,
                 optimizedAst,
                 instructions,
-                ErrorHandler.getErrors());
+                ErrorHandler.getErrors(),
+                ErrorHandler.getWarnings());
     }
 
     public void compileAndRun(String source) {
@@ -73,6 +77,12 @@ public final class CompilerPipeline {
                 System.err.println(error);
             }
             return;
+        }
+
+        if (result.warnings != null && !result.warnings.isEmpty()) {
+            for (String warning : result.warnings) {
+                System.err.println(warning);
+            }
         }
 
         Interpreter interpreter = new Interpreter();
