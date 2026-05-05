@@ -1,0 +1,16 @@
+class ExpressionTest {
+    void test() {
+        int x = 5;
+        int y = 10;
+        
+        // These statements should warn about being useless
+        x + y;           // Useless expression
+        5;               // Literal with no effect
+        x;               // Just a variable, no effect
+        
+        // These are fine
+        println(x);      // Method call has side effects
+        x = y;           // Assignment has side effects
+        x++;             // Postfix increment has side effects
+    }
+}

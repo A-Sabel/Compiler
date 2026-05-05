@@ -1,0 +1,20 @@
+class SuspiciousConditionTest {
+    void test() {
+        int x = 5;
+        
+        // Suspicious: assignment in condition
+        if (x = 10) {  // Should warn: did you mean ==?
+            println("if condition");
+        }
+        
+        // Also suspicious in while
+        while (x = 0) {  // Should warn: did you mean ==?
+            println("while condition");
+        }
+        
+        // These are fine
+        if (x == 5) {
+            println("correct comparison");
+        }
+    }
+}

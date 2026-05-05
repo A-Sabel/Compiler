@@ -9,7 +9,7 @@ import java.util.Map;
 public final class SymbolTable {
     // Stack of scopes for variables: Maps variable names to their data types
     private final Deque<Map<String, String>> scopes;
-    
+
     // Global registry for methods: MethodName -> List of overloads
     private final Map<String, List<MethodSignature>> methods;
 
@@ -17,7 +17,7 @@ public final class SymbolTable {
     public static class MethodSignature {
         public String returnType;
         public List<String> parameterTypes;
-        
+
         public MethodSignature(String returnType, List<String> parameterTypes) {
             this.returnType = returnType;
             this.parameterTypes = parameterTypes;
@@ -56,8 +56,30 @@ public final class SymbolTable {
     }
 
     public boolean isDeclaredInCurrentScope(String name) {
-        if (scopes.isEmpty()) return false;
+        if (scopes.isEmpty())
+            return false;
         return scopes.peek().containsKey(name); // Checks ONLY the current block
+    }
+
+    /**
+     * Checks if a variable is declared in any outer scope (excluding the current
+     * scope).
+     * Used for variable shadowing detection.
+     */
+    public boolean isDeclaredInOuterScope(String name) {
+        if (scopes.size() <= 1)
+            return false; // Only global scope or no scopes
+
+        // Convert deque to list to skip the last element (current scope)
+        java.util.List<Map<String, String>> scopeList = new java.util.ArrayList<>(scopes);
+        // Check all scopes except the current one (which is at the end when iterating
+        // forward)
+        for (int i = 0; i < scopeList.size() - 1; i++) {
+            if (scopeList.get(i).containsKey(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // --- Method Management (OVERLOADING SUPPORT) ---

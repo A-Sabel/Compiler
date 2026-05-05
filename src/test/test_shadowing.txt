@@ -1,0 +1,16 @@
+class ShadowingTest {
+    int x = 10;  // Outer variable
+    
+    void test() {
+        int x = 20;  // Should warn: shadows outer x
+        println(x);
+    }
+    
+    void nested() {
+        int y = 5;
+        {
+            int y = 10;  // Should warn: shadows outer y
+            println(y);
+        }
+    }
+}

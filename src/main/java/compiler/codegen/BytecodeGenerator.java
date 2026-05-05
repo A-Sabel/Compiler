@@ -678,6 +678,14 @@ public class BytecodeGenerator {
                 handleTry(node);
                 return null;
 
+            case "THROW":
+                if (!node.getChildren().isEmpty()) {
+                    visit(node.getChildren().get(0));
+                    stackTracker.pop(1);
+                }
+                unreachable = true;
+                return null;
+
             case "PARAMS":
             case "PARAM":
             case "MODIFIERS":

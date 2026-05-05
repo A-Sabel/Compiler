@@ -170,6 +170,18 @@ public class Parser {
 
         methodNode.addChild(paramsNode);
 
+        // Parse throws clause (Optional)
+        if (check("KEYWORD", "throws")) {
+            advance(); // consume 'throws'
+            ASTNode throwsNode = ASTNode.of("THROWS");
+            do {
+                String exName = currentLexeme();
+                advance();
+                throwsNode.addChild(ASTNode.of("EXCEPTION", exName));
+            } while (matchAndAdvance("PUNCTUATION", ","));
+            methodNode.addChild(throwsNode);
+        }
+
         // 6. Parse the method body
         Tokens braceToken = current(); // Capture '{' for BODY wrapper[cite: 1]
         ASTNode body = parseBlock();
@@ -274,8 +286,12 @@ public class Parser {
             return parseContinue();
         if (check("KEYWORD", "return"))
             return parseReturn();
+        if (check("KEYWORD", "throw"))
+            return parseThrow();
         if (check("KEYWORD", "switch"))
             return parseSwitch();
+        if (check("KEYWORD", "try"))
+            return parseTry();
 
         // 5. System calls
         if (isPrintStatement())
@@ -452,6 +468,52 @@ public class Parser {
         }
         consumePunctuation(";");
         return returnNode;
+    }
+
+    // ── throw ──────────────────────────────────────────────────────────────────
+    private ASTNode parseThrow() {
+        Tokens t = current();
+        consume("KEYWORD", "throw");
+        ASTNode expr = parseExpression();
+        consumePunctuation(";");
+        ASTNode throwNode = ASTNode.of("THROW", t.getLine(), t.getColumn());
+        if (expr != null)
+            throwNode.addChild(expr);
+        return throwNode;
+    }
+
+    // ── try-catch ──────────────────────────────────────────────────────────────
+    private ASTNode parseTry() {
+        Tokens t = current();
+        consume("KEYWORD", "try");
+        ASTNode tryBlock = parseBlock();
+
+        ASTNode tryNode = ASTNode.of("TRY_STMT", t.getLine(), t.getColumn());
+        tryNode.addChild(wrapAs("BODY", tryBlock));
+
+        while (check("KEYWORD", "catch")) {
+            Tokens cToken = current();
+            advance(); // consume 'catch'
+            consume("SPECIAL_CHAR", "(");
+            ASTNode catchNode = ASTNode.of("CATCH", cToken.getLine(), cToken.getColumn());
+
+            // Exception type (could be an identifier)
+            String exType = currentLexeme();
+            advance(); // Consume type
+            catchNode.addChild(ASTNode.of("TYPE", exType, cToken.getLine(), cToken.getColumn()));
+
+            // Exception variable name
+            String exName = currentLexeme();
+            advance(); // Consume name
+            catchNode.addChild(ASTNode.of("NAME", exName, cToken.getLine(), cToken.getColumn()));
+
+            consume("SPECIAL_CHAR", ")");
+            ASTNode catchBody = parseBlock();
+            catchNode.addChild(wrapAs("BODY", catchBody));
+
+            tryNode.addChild(catchNode);
+        }
+        return tryNode;
     }
 
     // ── break ──────────────────────────────────────────────────────────────────
@@ -1196,7 +1258,8 @@ public class Parser {
             if (currentType() != null && currentType().equals("KEYWORD")) {
                 String lex = currentLexeme();
                 if (lex.equals("if") || lex.equals("for") || lex.equals("while")
-                        || lex.equals("int") || lex.equals("String") || lex.equals("return")) {
+                        || lex.equals("int") || lex.equals("String") || lex.equals("return")
+                        || lex.equals("try") || lex.equals("catch") || lex.equals("throw")) {
                     return;
                 }
             }

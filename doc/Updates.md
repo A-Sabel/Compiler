@@ -95,6 +95,7 @@
   - **For-Each Loop Analysis:** Validates iterable collections and iterator types.
   - **Dead Code Detection:** Warns on unreachable code after `return`/`break`/`continue`.
 - ✅ **Smart Error Suppression:** Sentinel Type Strategy (prevents "Double Jeopardy").
+- ✅ **Exception Type Checking:** Strictly enforces handled checked exceptions via `try-catch` blocks or `throws` method signatures.
 
 ### 10. Code Generation (`codegen/` folder)
 
@@ -124,7 +125,6 @@
 
 - Generic types
 - Lambda expressions
-- Exception type checking
 
 ---
 
@@ -153,6 +153,7 @@
 - Added comprehensive validation for **For-Each Loops** and array bounding.
 - Enhanced ternary expression type checking and full variable scope tracking.
 - Refined Dead Code detection post-terminal statements (`return`, `break`, `continue`).
+- Implemented **Exception Type Checking** to strictly enforce handled checked exceptions (`try-catch` and `throws`).
 
 ### Code Generation & Optimization
 

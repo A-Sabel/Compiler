@@ -274,3 +274,47 @@ void main() {
     runEnrollment();
     verifyStatus(101, "Regular", true);     // ERROR 11: Method 'verifyStatus' expects 2 argument(s), but got 3
 }
+
+-----------------------------------------------------------------------------------
+// --- LEVEL 6: Exception Handling (try-catch & throws) ---
+
+// 1. Valid throws clause
+void testExceptions() throws IOException {
+    // PASS: 'IOException' is declared in the method's throws clause
+    throw new IOException("Disk error");
+}
+
+// 2. Valid try-catch blocks
+void testTryCatch() {
+    try {
+        // PASS: Caught by exact match
+        throw new SQLException("DB error");
+    } catch (SQLException e) {
+        String msg = "Handled DB error";
+        System.out.println(msg + e);
+    }
+    
+    try {
+        // PASS: Caught by generic Exception superclass
+        throw new CustomException("Custom error");
+    } catch (Exception e) {
+        String msg = "Handled generic error";
+        System.out.println(msg + e);
+    }
+}
+
+// 3. Unhandled Exceptions
+void unhandledExceptions(boolean connectionLost) {
+    if (connectionLost) {
+        // ERROR: Unhandled exception type 'NetworkException'. Must be caught or declared to be thrown.
+        throw new NetworkException("Connection lost");
+    }
+    
+    try {
+        // ERROR: Unhandled exception type 'TimeoutException'. Must be caught or declared to be thrown.
+        throw new TimeoutException("Timed out");
+    } catch (IOException e) {
+        String msg = "Wrong handler";
+        System.out.println(msg + e);
+    }
+}

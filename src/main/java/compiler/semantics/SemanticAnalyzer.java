@@ -35,6 +35,12 @@ public class SemanticAnalyzer {
     private final Deque<Map<String, VarInfo>> varDeclarations = new ArrayDeque<>();
     private final Deque<Set<String>> varUsage = new ArrayDeque<>();
 
+    // Track exceptions caught in the current try-catch scopes
+    private final Deque<Set<String>> currentCatchBlocks = new ArrayDeque<>();
+
+    // Track exceptions declared in the current method's throws clause
+    private final Set<String> currentMethodThrows = new HashSet<>();
+
     public SemanticAnalyzer() {
         this.symbolTable = new SymbolTable();
         // Initialize with global scope
@@ -92,7 +98,15 @@ public class SemanticAnalyzer {
             // and out-of-scope variable errors are correctly reported.
             case "EXPR_STMT":
                 if (!node.getChildren().isEmpty()) {
-                    analyze(node.getChildren().get(0));
+                    ASTNode expr = node.getChildren().get(0);
+                    analyze(expr);
+
+                    // Warn about unused expressions (expressions without side effects)
+                    if (isUselessExpression(expr)) {
+                        ErrorHandler.report(
+                                "Warning: Statement has no effect. This expression does nothing.",
+                                expr.getLine(), expr.getColumn());
+                    }
                 }
                 break;
 
@@ -111,6 +125,14 @@ public class SemanticAnalyzer {
 
             case "RETURN":
                 validateReturnStatement(node);
+                break;
+
+            case "TRY_STMT":
+                analyzeTryStatement(node);
+                break;
+
+            case "THROW":
+                analyzeThrowStatement(node);
                 break;
 
             case "IF_STMT":
@@ -163,6 +185,84 @@ public class SemanticAnalyzer {
             default:
                 analyzeChildren(node);
                 break;
+        }
+    }
+
+    // ── Try-Catch & Exceptions ─────────────────────────────────────────────────
+    private void analyzeTryStatement(ASTNode node) {
+        ASTNode body = null;
+        List<ASTNode> catchNodes = new java.util.ArrayList<>();
+
+        for (ASTNode child : node.getChildren()) {
+            if (child.getType().equals("BODY"))
+                body = child;
+            else if (child.getType().equals("CATCH"))
+                catchNodes.add(child);
+        }
+
+        Set<String> caughtHere = new HashSet<>();
+        for (ASTNode c : catchNodes) {
+            for (ASTNode cc : c.getChildren()) {
+                if (cc.getType().equals("TYPE")) {
+                    caughtHere.add(cc.getValue());
+                }
+            }
+        }
+
+        currentCatchBlocks.push(caughtHere);
+        if (body != null) {
+            analyze(body);
+        }
+        currentCatchBlocks.pop();
+
+        for (ASTNode c : catchNodes) {
+            symbolTable.enterScope();
+            String name = null;
+            String type = null;
+            ASTNode catchBody = null;
+
+            for (ASTNode cc : c.getChildren()) {
+                if (cc.getType().equals("TYPE"))
+                    type = cc.getValue();
+                if (cc.getType().equals("NAME"))
+                    name = cc.getValue();
+                if (cc.getType().equals("BODY"))
+                    catchBody = cc;
+            }
+
+            if (name != null && type != null) {
+                symbolTable.defineVariable(name, type);
+                if (!varDeclarations.isEmpty()) {
+                    varDeclarations.peek().put(name, new VarInfo(type, c.getLine(), c.getColumn()));
+                }
+            }
+
+            if (catchBody != null) {
+                analyze(catchBody);
+            }
+            symbolTable.exitScope();
+        }
+    }
+
+    private void analyzeThrowStatement(ASTNode node) {
+        if (node.getChildren().isEmpty())
+            return;
+        ASTNode expr = node.getChildren().get(0);
+        String exType = inferExpressionType(expr);
+        if (exType == null || exType.equals("unknown") || exType.equals("type_error")
+                || exType.equals("RuntimeException")) {
+            return;
+        }
+        boolean isCaught = false;
+        for (Set<String> caught : currentCatchBlocks) {
+            if (caught.contains(exType) || caught.contains("Exception")) {
+                isCaught = true;
+                break;
+            }
+        }
+        if (!isCaught && !currentMethodThrows.contains(exType) && !currentMethodThrows.contains("Exception")) {
+            ErrorHandler.report("Semantic Error: Unhandled exception type '" + exType
+                    + "'. Must be caught or declared to be thrown.", node.getLine(), node.getColumn());
         }
     }
 
@@ -271,6 +371,13 @@ public class SemanticAnalyzer {
             return;
         }
 
+        // Variable shadowing check (warning only, not an error)
+        if (symbolTable.isDeclaredInOuterScope(name)) {
+            ErrorHandler.report(
+                    "Warning: Variable '" + name + "' shadows a variable from an outer scope.",
+                    nameNode.getLine(), nameNode.getColumn());
+        }
+
         // Initializer type check
         if (children.size() >= 3) {
             ASTNode initWrapper = children.get(2);
@@ -308,6 +415,7 @@ public class SemanticAnalyzer {
         String returnType = "void";
         ASTNode paramsNode = null;
         ASTNode bodyNode = null;
+        ASTNode throwsNode = null;
 
         for (ASTNode child : node.getChildren()) {
             switch (child.getType()) {
@@ -316,6 +424,9 @@ public class SemanticAnalyzer {
                     break;
                 case "PARAMS":
                     paramsNode = child;
+                    break;
+                case "THROWS":
+                    throwsNode = child;
                     break;
                 case "BODY":
                     bodyNode = child;
@@ -354,6 +465,13 @@ public class SemanticAnalyzer {
                     node.getLine(), node.getColumn());
         } else {
             symbolTable.defineMethod(methodName, returnType, paramTypes);
+        }
+
+        currentMethodThrows.clear();
+        if (throwsNode != null) {
+            for (ASTNode exNode : throwsNode.getChildren()) {
+                currentMethodThrows.add(exNode.getValue());
+            }
         }
 
         // Set up scope and analyze body
@@ -994,7 +1112,7 @@ public class SemanticAnalyzer {
             analyze(child);
             String childType = child.getType();
             if (childType.equals("RETURN") || childType.equals("BREAK")
-                    || childType.equals("CONTINUE")) {
+                    || childType.equals("CONTINUE") || childType.equals("THROW")) {
                 isReachable = false;
             }
         }
@@ -1028,6 +1146,8 @@ public class SemanticAnalyzer {
 
     /**
      * Enforces that IF/WHILE/FOR conditions evaluate to boolean.
+     * Also warns about suspicious assignments in conditions (e.g., if (x = 5)
+     * instead of if (x == 5)).
      * FIX: Now uses the CONDITION node's own coordinates instead of -1, -1.
      */
     private void validateBooleanCondition(ASTNode loopOrIfNode) {
@@ -1036,6 +1156,14 @@ public class SemanticAnalyzer {
                 if (child.getChildren().isEmpty())
                     break;
                 ASTNode expression = child.getChildren().get(0);
+
+                // Check for suspicious assignment in condition
+                if (expression.getType().equals("ASSIGN")) {
+                    ErrorHandler.report(
+                            "Warning: Assignment in condition. Did you mean to use == instead of =?",
+                            expression.getLine(), expression.getColumn());
+                }
+
                 String condType = inferExpressionType(expression);
                 if (!"boolean".equals(condType) && !"unknown".equals(condType)
                         && !"type_error".equals(condType)) {
@@ -1055,6 +1183,7 @@ public class SemanticAnalyzer {
 
         switch (type) {
             case "RETURN":
+            case "THROW":
                 return true;
             case "BLOCK":
             case "BODY":
@@ -1076,5 +1205,32 @@ public class SemanticAnalyzer {
             default:
                 return false;
         }
+    }
+
+    /**
+     * Determines if an expression is useless (has no side effects).
+     * Expressions like literals, variables, and arithmetic without assignment
+     * are considered useless when used as standalone statements.
+     */
+    private boolean isUselessExpression(ASTNode expr) {
+        if (expr == null)
+            return false;
+
+        String type = expr.getType();
+
+        // These have side effects or are not useless:
+        if (type.equals("ASSIGN") || type.equals("METHOD_CALL") || type.equals("PRINT_STMT")
+                || type.equals("PREFIX_OP") || type.equals("POSTFIX_OP")) {
+            return false;
+        }
+
+        // Literals and identifiers alone are useless (except in specific contexts)
+        if (type.equals("LITERAL") || type.equals("STRING_LITERAL") || type.equals("IDENTIFIER")
+                || type.equals("BINARY_OP") || type.equals("UNARY_OP") || type.equals("TERNARY")
+                || type.equals("ARRAY_ACCESS")) {
+            return true;
+        }
+
+        return false;
     }
 }
