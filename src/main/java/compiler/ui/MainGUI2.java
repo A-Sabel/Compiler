@@ -358,12 +358,13 @@ public class MainGUI2 extends JFrame {
 
     // ── Visibility State & References ─────────────────────────────────────────
     private boolean showConsoleTab = true, showErrorsTab = true, showWarningsTab = true;
-    private boolean showRuntimeTab = true, showSymbolTab = true, showGeneratedTab = true;
-    private JPanel runtimeTabPanel, astTreeTabPanel, symbolTableTabPanel, generatedCodeTabPanel;
+    private boolean showRuntimeTab = true, showSymbolTab = true, showGeneratedTab = true, showTokenTab = true;
+    private JPanel runtimeTabPanel, astTreeTabPanel, symbolTableTabPanel, generatedCodeTabPanel, tokenTableTabPanel;
     private JPanel tabsLeft; // Container for bottom console labels
-    private final String[][] tabData = {
+    private String[][] tabData = {
             { "\u25B6", "Runtime Output" }, { "\uD83C\uDF32", "AST Tree" },
-            { "\u25A3", "Symbol Table" }, { "{ }", "Generated Code" }
+            { "\u25A3", "Symbol Table" }, { "{ }", "Generated Code" },
+            { "\uD83D\uDCC4", "Token Table" }
     };
 
     // FIX (appendConsole color): replaced JTextArea with JTextPane + StyledDocument
@@ -384,6 +385,12 @@ public class MainGUI2 extends JFrame {
     private JComboBox<String> filterCombo;
     private TableRowSorter<DefaultTableModel> symbolSorter;
     private DefaultTableModel symbolModel;
+    private JTable tokenLexemeTable;
+    private JTable tokenCategoryTable;
+    private DefaultTableModel tokenLexemeModel;
+    private DefaultTableModel tokenCategoryModel;
+    private TableRowSorter<DefaultTableModel> tokenLexemeSorter;
+    private JTextField tokenSearchField;
     private JTable generatedCodeTable;
     private DefaultTableModel generatedCodeModel;
     private JTextArea runtimeArea;
@@ -1209,6 +1216,7 @@ public class MainGUI2 extends JFrame {
         astTreeTabPanel = buildAstTreePanel();
         symbolTableTabPanel = buildSymbolTablePanel();
         generatedCodeTabPanel = buildGeneratedCodePanel();
+        tokenTableTabPanel = buildTokenTablePanel();
 
         updateOutputTabs();
 
@@ -1226,6 +1234,8 @@ public class MainGUI2 extends JFrame {
             addTabToOutput(2, symbolTableTabPanel);
         if (showGeneratedTab)
             addTabToOutput(3, generatedCodeTabPanel);
+        if (showTokenTab)
+            addTabToOutput(4, tokenTableTabPanel);
     }
 
     // ── Editor Indentation Support ───────────────────────────────────────
@@ -1718,6 +1728,76 @@ public class MainGUI2 extends JFrame {
         p.add(bar, BorderLayout.NORTH);
         p.add(scroll, BorderLayout.CENTER);
         return p;
+    }
+
+    private JPanel buildTokenTablePanel() {
+        JPanel p = new JPanel(new BorderLayout(0, 6));
+        p.setBackground(bg());
+        p.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
+
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        bar.setOpaque(false);
+
+        JLabel searchIcon = new JLabel("\uD83D\uDD0D");
+        searchIcon.setFont(FONT_ICON);
+        tokenSearchField = new JTextField(14);
+        tokenSearchField.setFont(FONT_UI_SM);
+        tokenSearchField.setBackground(bgPanel());
+        tokenSearchField.setForeground(accentDark());
+        tokenSearchField.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(border()),
+                BorderFactory.createEmptyBorder(3, 6, 3, 6)));
+        tokenSearchField.getDocument().addDocumentListener(new DocumentListener() {
+            public void insertUpdate(DocumentEvent e) { applyTokenFilter(); }
+            public void removeUpdate(DocumentEvent e) { applyTokenFilter(); }
+            public void changedUpdate(DocumentEvent e) { applyTokenFilter(); }
+        });
+        bar.add(searchIcon);
+        bar.add(new JLabel("Search Lexemes:"));
+        bar.add(tokenSearchField);
+
+        tokenLexemeModel = new DefaultTableModel(new String[]{"Lexeme", "Category", "Line", "Column", "Occurrences"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        tokenLexemeTable = new JTable(tokenLexemeModel);
+        styleTable(tokenLexemeTable);
+        tokenLexemeSorter = new TableRowSorter<>(tokenLexemeModel);
+        tokenLexemeTable.setRowSorter(tokenLexemeSorter);
+
+        tokenCategoryModel = new DefaultTableModel(new String[]{"Category", "Count"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        tokenCategoryTable = new JTable(tokenCategoryModel);
+        styleTable(tokenCategoryTable);
+
+        JScrollPane lexScroll = new JScrollPane(tokenLexemeTable);
+        lexScroll.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(border()), "Lexeme Stream"));
+        lexScroll.getViewport().setBackground(bg());
+        styleScrollBar(lexScroll.getVerticalScrollBar());
+
+        JScrollPane catScroll = new JScrollPane(tokenCategoryTable);
+        catScroll.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(border()), "Category Summary"));
+        catScroll.getViewport().setBackground(bg());
+        styleScrollBar(catScroll.getVerticalScrollBar());
+
+        JPanel grid = new JPanel(new GridLayout(2, 1, 0, 8));
+        grid.setOpaque(false);
+        grid.add(lexScroll);
+        grid.add(catScroll);
+
+        p.add(bar, BorderLayout.NORTH);
+        p.add(grid, BorderLayout.CENTER);
+        return p;
+    }
+
+    private void applyTokenFilter() {
+        if (tokenLexemeSorter == null) return;
+        String text = tokenSearchField.getText().toLowerCase();
+        if (text.isEmpty()) {
+            tokenLexemeSorter.setRowFilter(null);
+        } else {
+            tokenLexemeSorter.setRowFilter(RowFilter.regexFilter("(?i)" + Pattern.quote(text)));
+        }
     }
 
     private void applySymbolFilter() {
@@ -2318,6 +2398,8 @@ public class MainGUI2 extends JFrame {
             symbolModel.setRowCount(0);
         if (generatedCodeModel != null)
             generatedCodeModel.setRowCount(0);
+        if (tokenLexemeModel != null) tokenLexemeModel.setRowCount(0);
+        if (tokenCategoryModel != null) tokenCategoryModel.setRowCount(0);
         if (runtimeArea != null)
             runtimeArea.setText("// Program output will appear here after execution\n");
         errorListModel.clear();
@@ -2390,6 +2472,8 @@ public class MainGUI2 extends JFrame {
             symbolModel.setRowCount(0);
         if (generatedCodeModel != null)
             generatedCodeModel.setRowCount(0);
+        if (tokenLexemeModel != null) tokenLexemeModel.setRowCount(0);
+        if (tokenCategoryModel != null) tokenCategoryModel.setRowCount(0);
         if (runtimeArea != null)
             runtimeArea.setText("");
         errorListModel.clear();
@@ -2449,6 +2533,10 @@ public class MainGUI2 extends JFrame {
         }));
         content.add(createSettingsCheckbox("Generated Code", showGeneratedTab, e -> {
             showGeneratedTab = ((JCheckBox) e.getSource()).isSelected();
+            updateOutputTabs();
+        }));
+        content.add(createSettingsCheckbox("Token Table", showTokenTab, e -> {
+            showTokenTab = ((JCheckBox) e.getSource()).isSelected();
             updateOutputTabs();
         }));
 
@@ -2554,7 +2642,7 @@ public class MainGUI2 extends JFrame {
             currentFontSize = 13;
             currentTheme = Theme.BLUE;
             isAutoSaveEnabled = false;
-            showConsoleTab = showErrorsTab = showWarningsTab = true;
+            showConsoleTab = showErrorsTab = showWarningsTab = showTokenTab = true;
             showRuntimeTab = showSymbolTab = showGeneratedTab = true;
 
             // Refresh UI and Close Dialog
@@ -2787,6 +2875,31 @@ public class MainGUI2 extends JFrame {
                                     ins.toString()
                             });
                         }
+
+                        // Populate Token Tables
+                        tokenLexemeModel.setRowCount(0);
+                        tokenCategoryModel.setRowCount(0);
+                        java.util.Map<String, Integer> lexemeCounts = new java.util.HashMap<>();
+                        java.util.Map<String, Integer> catCounts = new java.util.LinkedHashMap<>();
+                        
+                        for (compiler.lexer.models.Tokens t : compileResult.tokens) {
+                            String lex = t.getLexeme();
+                            String cat = t.getClass().getSimpleName().toUpperCase().replace("TOKEN", "").replace("TOK", "").replace("TYPE", "").trim();
+                            lexemeCounts.put(lex, lexemeCounts.getOrDefault(lex, 0) + 1);
+                            catCounts.put(cat, catCounts.getOrDefault(cat, 0) + 1);
+                        }
+                        
+                        for (compiler.lexer.models.Tokens t : compileResult.tokens) {
+                            String cat = t.getClass().getSimpleName().toUpperCase().replace("TOKEN", "").replace("TOK", "").replace("TYPE", "").trim();
+                            tokenLexemeModel.addRow(new Object[]{ t.getLexeme(), cat, t.getLine(), t.getColumn(), lexemeCounts.get(t.getLexeme()) });
+                        }
+                        
+                        catCounts.forEach((cat, count) -> tokenCategoryModel.addRow(new Object[]{ cat, count }));
+
+                        tokenTableTabPanel.revalidate();
+                        tokenTableTabPanel.repaint();
+                        outputTabs.revalidate();
+                        outputTabs.repaint();
 
                         astTreeModel.setRoot(astRoot);
                         for (int i = 0; i < astTree.getRowCount(); i++)
