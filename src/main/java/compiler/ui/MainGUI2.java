@@ -51,6 +51,7 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.JSlider;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
@@ -303,6 +304,7 @@ public class MainGUI2 extends JFrame {
     private JLabel warnCountLabel;
     private int errorCount = 0;
     private int warnCount = 0;
+    private int currentFontSize = 13;
     private String activeConsoleTab = "Console";
 
     private JLabel consoleTabBtn;
@@ -804,6 +806,7 @@ public class MainGUI2 extends JFrame {
                 SimpleAttributeSet defaultAttr = new SimpleAttributeSet();
                 StyleConstants.setForeground(defaultAttr, isDarkMode ? D_ACCENT_BLACK : Color.BLACK);
                 StyleConstants.setFontFamily(defaultAttr, FONT_MONO.getFamily());
+                StyleConstants.setFontSize(defaultAttr, currentFontSize);
                 doc.setCharacterAttributes(0, text.length(), defaultAttr, true);
 
                 // 2. Methods (Matched before keywords to avoid overlapping) -> Gold
@@ -1628,7 +1631,7 @@ public class MainGUI2 extends JFrame {
             SimpleAttributeSet attrs = new SimpleAttributeSet();
             StyleConstants.setForeground(attrs, color);
             StyleConstants.setFontFamily(attrs, "Consolas");
-            StyleConstants.setFontSize(attrs, 11);
+            StyleConstants.setFontSize(attrs, Math.max(currentFontSize - 2, 1));
             consoleDoc.insertString(consoleDoc.getLength(), text + "\n", attrs);
             // Auto-scroll to bottom
             consolePane.setCaretPosition(consoleDoc.getLength());
@@ -1825,6 +1828,26 @@ public class MainGUI2 extends JFrame {
             updateOutputTabs();
         }));
 
+        content.add(Box.createVerticalStrut(20));
+        JLabel fontTitle = new JLabel("Font Size (0 - 15)");
+        fontTitle.setFont(FONT_UI_B);
+        fontTitle.setForeground(labelFg());
+        content.add(fontTitle);
+        content.add(Box.createVerticalStrut(10));
+
+        JSlider fontSlider = new JSlider(0, 15, currentFontSize);
+        fontSlider.setOpaque(false);
+        fontSlider.setMajorTickSpacing(5);
+        fontSlider.setMinorTickSpacing(1);
+        fontSlider.setPaintTicks(true);
+        fontSlider.setPaintLabels(true);
+        fontSlider.setForeground(labelFg());
+        fontSlider.addChangeListener(e -> {
+            int newSize = fontSlider.getValue();
+            updateFontSize(newSize);
+        });
+        content.add(fontSlider);
+
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         actions.setBackground(bgLight());
         JButton applyBtn = new JButton("Apply");
@@ -1840,6 +1863,42 @@ public class MainGUI2 extends JFrame {
         dialog.setSize(300, 400);
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
+    }
+
+    private void updateFontSize(int size) {
+        // Ensure text remains visible even if 0 is selected
+        int effectiveSize = Math.max(size, 1);
+        currentFontSize = effectiveSize;
+
+        Font newMono = FONT_MONO.deriveFont((float) effectiveSize);
+        Font newMonoSm = FONT_MONO_SM.deriveFont((float) Math.max(effectiveSize - 2, 1));
+
+        if (codeEditor != null) {
+            codeEditor.setFont(newMono);
+            applySyntaxHighlighting();
+            
+            // Update Line Numbers by finding the scroll pane
+            if (codeEditor.getParent() != null && codeEditor.getParent().getParent() instanceof JScrollPane) {
+                JScrollPane sp = (JScrollPane) codeEditor.getParent().getParent();
+                if (sp.getRowHeader() != null && sp.getRowHeader().getView() != null) {
+                    Component lnc = sp.getRowHeader().getView();
+                    lnc.setFont(newMono);
+                    lnc.revalidate();
+                    lnc.repaint();
+                }
+            }
+        }
+
+        if (consolePane != null) consolePane.setFont(newMonoSm);
+        if (runtimeArea != null) runtimeArea.setFont(newMonoSm);
+        if (astTree != null) astTree.setFont(newMonoSm);
+        if (errorList != null) errorList.setFont(newMonoSm);
+        if (warningList != null) warningList.setFont(newMonoSm);
+        
+        if (generatedCodeTable != null) {
+            generatedCodeTable.setFont(newMonoSm);
+            generatedCodeTable.setRowHeight(effectiveSize + 10);
+        }
     }
 
     private JCheckBox createSettingsCheckbox(String text, boolean selected, java.awt.event.ActionListener al) {
