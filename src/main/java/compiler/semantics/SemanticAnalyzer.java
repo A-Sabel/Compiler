@@ -545,6 +545,7 @@ public class SemanticAnalyzer {
                 // Single overload: give specific arity + type errors
                 if (possibleMethods.size() == 1) {
                     SymbolTable.MethodSignature sig = possibleMethods.get(0);
+                    expr.setAttribute("resolved_return_type", sig.returnType);
                     if (sig.parameterTypes.size() != providedTypes.size()) {
                         ErrorHandler.report(
                             "Semantic Error: Method '" + methodName + "' expects "
@@ -596,6 +597,10 @@ public class SemanticAnalyzer {
                         expr.getLine(), expr.getColumn());
                     return "unknown";
                 }
+                if (matched == null) {
+                    return "unknown";
+                }
+                expr.setAttribute("resolved_return_type", matched.returnType);
                 return matched.returnType;
             }
 

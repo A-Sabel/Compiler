@@ -74,13 +74,22 @@ public class Interpreter {
                         break;
                     }
 
-                    case ILOAD: case LLOAD: case FLOAD: case DLOAD: case ALOAD: {
-                        context.temps.put(instr.getResult(), context.variables.getOrDefault(slotKey(instr.getArg1()), 0));
+                    case ILOAD:
+                    case LLOAD:
+                    case FLOAD:
+                    case DLOAD:
+                    case ALOAD: {
+                        context.temps.put(instr.getResult(),
+                                context.variables.getOrDefault(slotKey(instr.getArg1()), 0));
                         break;
                     }
 
-                    case ISTORE: case LSTORE: case FSTORE: case DSTORE: case ASTORE: {
-                        context.variables.put(slotKey(instr.getArg1()), resolveValue(instr.getOp(), context));
+                    case ISTORE:
+                    case LSTORE:
+                    case FSTORE:
+                    case DSTORE:
+                    case ASTORE: {
+                        context.variables.put(slotKey(instr.getArg1()), resolveValue(instr.getArg2(), context));
                         break;
                     }
 
@@ -90,7 +99,8 @@ public class Interpreter {
                         Object value = null;
                         if (base instanceof List) {
                             List<?> list = (List<?>) base;
-                            if (idx >= 0 && idx < list.size()) value = list.get(idx);
+                            if (idx >= 0 && idx < list.size())
+                                value = list.get(idx);
                         }
                         context.temps.put(instr.getResult(), value);
                         break;
@@ -103,7 +113,8 @@ public class Interpreter {
                         if (base instanceof List) {
                             @SuppressWarnings("unchecked")
                             List<Object> list = (List<Object>) base;
-                            if (idx >= 0 && idx < list.size()) list.set(idx, value);
+                            if (idx >= 0 && idx < list.size())
+                                list.set(idx, value);
                         }
                         break;
                     }
@@ -130,7 +141,7 @@ public class Interpreter {
                             Map<String, Object> map = (Map<String, Object>) objectValue;
                             map.put(instr.getOp(), fieldValue);
                         }
-                        
+
                         break;
                     }
 
@@ -172,7 +183,11 @@ public class Interpreter {
                         break;
                     }
 
-                    case IADD: case ISUB: case IMUL: case IDIV: case IMOD: {
+                    case IADD:
+                    case ISUB:
+                    case IMUL:
+                    case IDIV:
+                    case IMOD: {
                         Object a = resolveValue(instr.getArg1(), context);
                         Object b = resolveValue(instr.getArg2(), context);
                         Number an = toNumber(a);
@@ -180,11 +195,16 @@ public class Interpreter {
                         long left = an.longValue();
                         long right = bn.longValue();
                         long result;
-                        if (opcode == Opcode.IADD) result = left + right;
-                        else if (opcode == Opcode.ISUB) result = left - right;
-                        else if (opcode == Opcode.IMUL) result = left * right;
-                        else if (opcode == Opcode.IDIV) result = left / right;
-                        else result = left % right;
+                        if (opcode == Opcode.IADD)
+                            result = left + right;
+                        else if (opcode == Opcode.ISUB)
+                            result = left - right;
+                        else if (opcode == Opcode.IMUL)
+                            result = left * right;
+                        else if (opcode == Opcode.IDIV)
+                            result = left / right;
+                        else
+                            result = left % right;
                         context.temps.put(instr.getResult(), (int) result);
                         break;
                     }
@@ -201,7 +221,12 @@ public class Interpreter {
                         break;
                     }
 
-                    case IAND: case LOR: case IXOR: case ISHL: case ISHR: case IUSHR: {
+                    case IAND:
+                    case LOR:
+                    case IXOR:
+                    case ISHL:
+                    case ISHR:
+                    case IUSHR: {
                         Object left = resolveValue(instr.getArg1(), context);
                         Object right = resolveValue(instr.getArg2(), context);
                         long leftVal = toNumber(left).longValue();
@@ -226,8 +251,12 @@ public class Interpreter {
                         break;
                     }
 
-                    case EQUAL: case NOT_EQUAL: case LESS_THAN: case LESS_EQUAL:
-                    case GREATER_THAN: case GREATER_EQUAL: {
+                    case EQUAL:
+                    case NOT_EQUAL:
+                    case LESS_THAN:
+                    case LESS_EQUAL:
+                    case GREATER_THAN:
+                    case GREATER_EQUAL: {
                         Object left = resolveValue(instr.getArg1(), context);
                         Object right = resolveValue(instr.getArg2(), context);
                         boolean result;
@@ -298,7 +327,8 @@ public class Interpreter {
                         int argCount = parseArgCount(instr.getArg2());
                         List<Object> args = consumeArgs(context, argCount);
                         Object receiver = resolveValue(instr.getArg1(), context);
-                        Object returnValue = invokeCall(instructions, instr.getOp(), instr.getDescriptor(), true, receiver, args);
+                        Object returnValue = invokeCall(instructions, instr.getOp(), instr.getDescriptor(), true,
+                                receiver, args);
                         if (instr.getResult() != null) {
                             context.temps.put(instr.getResult(), returnValue);
                         }
@@ -357,7 +387,7 @@ public class Interpreter {
     }
 
     private Object invokeCall(List<Instruction> instructions, String name, String descriptor,
-                              boolean isVirtual, Object receiver, List<Object> args) {
+            boolean isVirtual, Object receiver, List<Object> args) {
         if ("print".equals(name)) {
             for (Object arg : args) {
                 System.out.print(arg);
@@ -403,8 +433,9 @@ public class Interpreter {
     }
 
     private Object invokeMethod(List<Instruction> instructions, MethodInfo method,
-                                boolean isVirtual, Object receiver, List<Object> args) {
-        if (method == null) return null;
+            boolean isVirtual, Object receiver, List<Object> args) {
+        if (method == null)
+            return null;
         ExecutionContext nested = new ExecutionContext(method);
         if (isVirtual) {
             nested.variables.put(slotKey("0"), receiver);
@@ -432,9 +463,11 @@ public class Interpreter {
 
     private MethodInfo lookupMethod(String name, String descriptor) {
         MethodInfo exact = methodTable.get(methodKey(name, descriptor));
-        if (exact != null) return exact;
+        if (exact != null)
+            return exact;
         MethodInfo fallback = methodTable.get(methodKey(name, null));
-        if (fallback != null) return fallback;
+        if (fallback != null)
+            return fallback;
 
         for (MethodInfo method : methodTable.values()) {
             if (name.equals(method.name)) {
@@ -463,16 +496,17 @@ public class Interpreter {
             Instruction instr = instructions.get(i);
             if (instr.getOpcode() == Opcode.LABEL) {
                 String name = labelName(instr);
-                if (name != null) labelIndices.put(name, i);
+                if (name != null)
+                    labelIndices.put(name, i);
             }
         }
 
         for (int i = 0; i < instructions.size(); i++) {
             Instruction instr = instructions.get(i);
-                if (instr.getOpcode() == Opcode.CLASS) {
-                    // record class name so we can create a field container at runtime
-                    classStatics.put(instr.getArg1(), new HashMap<>());
-                }
+            if (instr.getOpcode() == Opcode.CLASS) {
+                // record class name so we can create a field container at runtime
+                classStatics.put(instr.getArg1(), new HashMap<>());
+            }
             if (instr.getOpcode() == Opcode.METHOD_START) {
                 String name = instr.getArg1();
                 String returnType = instr.getOp();
@@ -506,7 +540,7 @@ public class Interpreter {
                 String startLabel = instr.getArg1();
                 String endLabel = instr.getOp();
                 String handlerAndType = instr.getArg2();
-                String[] parts = handlerAndType != null ? handlerAndType.split(":", 2) : new String[]{null, null};
+                String[] parts = handlerAndType != null ? handlerAndType.split(":", 2) : new String[] { null, null };
                 Integer startIndex = labelIndices.get(startLabel);
                 Integer endIndex = labelIndices.get(endLabel);
                 Integer handlerIndex = labelIndices.get(parts[0]);
@@ -519,14 +553,16 @@ public class Interpreter {
 
     private Integer findExceptionHandler(int pc) {
         for (ExceptionEntry entry : exceptionTable) {
-            if (pc >= entry.start && pc < entry.end) return entry.handler;
+            if (pc >= entry.start && pc < entry.end)
+                return entry.handler;
         }
         return null;
     }
 
     private int findLabel(List<Instruction> instructions, String labelName) {
         Integer index = labelIndices.get(labelName);
-        if (index != null) return index;
+        if (index != null)
+            return index;
         for (int i = 0; i < instructions.size(); i++) {
             Instruction instr = instructions.get(i);
             if (instr.getOpcode() == Opcode.LABEL && labelName.equals(labelName(instr))) {
@@ -537,17 +573,27 @@ public class Interpreter {
     }
 
     private Object resolveValue(String name, ExecutionContext context) {
-        if (name == null) return null;
-        if (context.temps.containsKey(name)) return context.temps.get(name);
-        if ("this".equals(name)) return context.variables.get(slotKey("0"));
-        if (context.variables.containsKey(slotKey(name))) return context.variables.get(slotKey(name));
-        if (context.variables.containsKey(name)) return context.variables.get(name);
-        if (classStatics.containsKey(name)) return classStatics.get(name);
-        if ("true".equals(name)) return true;
-        if ("false".equals(name)) return false;
-        if (name.startsWith("\"") && name.endsWith("\"")) return name.substring(1, name.length() - 1);
+        if (name == null)
+            return null;
+        if (context.temps.containsKey(name))
+            return context.temps.get(name);
+        if ("this".equals(name))
+            return context.variables.get(slotKey("0"));
+        if (context.variables.containsKey(slotKey(name)))
+            return context.variables.get(slotKey(name));
+        if (context.variables.containsKey(name))
+            return context.variables.get(name);
+        if (classStatics.containsKey(name))
+            return classStatics.get(name);
+        if ("true".equals(name))
+            return true;
+        if ("false".equals(name))
+            return false;
+        if (name.startsWith("\"") && name.endsWith("\""))
+            return name.substring(1, name.length() - 1);
         try {
-            if (name.contains(".")) return Double.parseDouble(name);
+            if (name.contains("."))
+                return Double.parseDouble(name);
             return Integer.parseInt(name);
         } catch (NumberFormatException ex) {
             return name;
@@ -555,29 +601,45 @@ public class Interpreter {
     }
 
     private boolean isTruthy(Object value) {
-        if (value == null) return false;
-        if (value instanceof Boolean) return (Boolean) value;
-        if (value instanceof Number) return ((Number) value).longValue() != 0;
-        if (value instanceof String) return !((String) value).isEmpty();
+        if (value == null)
+            return false;
+        if (value instanceof Boolean)
+            return (Boolean) value;
+        if (value instanceof Number)
+            return ((Number) value).longValue() != 0;
+        if (value instanceof String)
+            return !((String) value).isEmpty();
         return true;
     }
 
     private Number toNumber(Object value) {
-        if (value instanceof Number) return (Number) value;
+        if (value instanceof Number)
+            return (Number) value;
         if (value instanceof String) {
-            try { return Integer.parseInt((String) value); } catch (Exception ignored) { }
-            try { return Double.parseDouble((String) value); } catch (Exception ignored) { }
+            try {
+                return Integer.parseInt((String) value);
+            } catch (Exception ignored) {
+            }
+            try {
+                return Double.parseDouble((String) value);
+            } catch (Exception ignored) {
+            }
         }
         return 0;
     }
 
     private Object parseLiteral(String value) {
-        if (value == null) return null;
-        if ("true".equals(value)) return true;
-        if ("false".equals(value)) return false;
-        if (value.startsWith("\"") && value.endsWith("\"")) return value.substring(1, value.length() - 1);
+        if (value == null)
+            return null;
+        if ("true".equals(value))
+            return true;
+        if ("false".equals(value))
+            return false;
+        if (value.startsWith("\"") && value.endsWith("\""))
+            return value.substring(1, value.length() - 1);
         try {
-            if (value.contains(".")) return Double.parseDouble(value);
+            if (value.contains("."))
+                return Double.parseDouble(value);
             return Integer.parseInt(value);
         } catch (NumberFormatException ex) {
             return value;
@@ -585,7 +647,8 @@ public class Interpreter {
     }
 
     private int parseArgCount(String raw) {
-        if (raw == null || raw.isEmpty()) return 0;
+        if (raw == null || raw.isEmpty())
+            return 0;
         try {
             return Integer.parseInt(raw);
         } catch (NumberFormatException ex) {

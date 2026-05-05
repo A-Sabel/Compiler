@@ -17,3 +17,65 @@ class FibonacciTest {
         }
     }
 }
+
+class ScopeTest {
+    // x gets Slot 0, y gets Slot 1
+    int calculate(int x, int y) {
+        int z = 100; // z gets Slot 2
+        return (x * y) + z;
+    }
+
+    void main() {
+        int a = 5;  // a gets Slot 0
+        int b = 10; // b gets Slot 1
+        
+        // The VM must create a new frame/local array for calculate()
+        int result = calculate(a, b); // result gets Slot 2
+        
+        print(result); // Expected Output: 150
+    }
+}
+
+class ControlFlowTest {
+    void main() {
+        int score = 85;
+        
+        if (score >= 90) {
+            print("Grade: A");
+        } else {
+            if (score >= 80) {
+                if (score == 85) {
+                    print("Grade: B+"); 
+                } else {
+                    print("Grade: B");
+                }
+            } else {
+                print("Grade: F");
+            }
+        }
+    }
+}
+
+class Demo {
+    void main() {
+        int x = 7;
+        String msg = "Test Run";
+
+        println(msg + " started...");
+
+        if (x % 2 == 0) {
+            println(x + " is even");
+        } else {
+            println(x + " is odd");
+        }
+
+        // Converted to a while loop just in case 'for' isn't supported yet
+        int i = 1;
+        while (i <= x) {
+            println("Loop " + i);
+            i = i + 1; // Use i++ if your compiler supports it
+        }
+
+        println("Done!");
+    }
+}

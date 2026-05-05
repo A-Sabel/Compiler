@@ -5,85 +5,85 @@ public final class Instruction {
     public enum Opcode {
 
         // ── TAC data movement ────────────────────────────────────────────────
-        LOAD_CONST,     // result = <literal>           e.g. t0 = 42
-        COPY,           // result = src                 e.g. x = t1
+        LOAD_CONST, // result = <literal> e.g. t0 = 42
+        COPY, // result = src e.g. x = t1
 
         // ── TAC arithmetic / logic (binary) ─────────────────────────────────
-        ADD,            // result = left + right
-        SUB,            // result = left - right
-        MUL,            // result = left * right
-        DIV,            // result = left / right
-        MOD,            // result = left % right
-        POW,            // result = left ** right
+        ADD, // result = left + right
+        SUB, // result = left - right
+        MUL, // result = left * right
+        DIV, // result = left / right
+        MOD, // result = left % right
+        POW, // result = left ** right
 
         // ── TAC unary ────────────────────────────────────────────────────────
-        NEG,            // result = - operand
-        NOT,            // result = ! operand
-        BITWISE_NOT,    // result = ~ operand
-        CAST,           // result = (type) operand
+        NEG, // result = - operand
+        NOT, // result = ! operand
+        BITWISE_NOT, // result = ~ operand
+        CAST, // result = (type) operand
 
         // ── TAC comparison (binary, result is bool temp) ─────────────────────
-        EQUAL,          // result = left == right
-        NOT_EQUAL,      // result = left != right
-        LESS_THAN,      // result = left <  right
-        LESS_EQUAL,     // result = left <= right
-        GREATER_THAN,   // result = left >  right
-        GREATER_EQUAL,  // result = left >= right
+        EQUAL, // result = left == right
+        NOT_EQUAL, // result = left != right
+        LESS_THAN, // result = left < right
+        LESS_EQUAL, // result = left <= right
+        GREATER_THAN, // result = left > right
+        GREATER_EQUAL, // result = left >= right
 
         // ── TAC array / field ────────────────────────────────────────────────
-        ARRAY_LOAD,     // result = base[index]
-        ARRAY_STORE,    // base[index] = src
-        FIELD_LOAD,     // result = object.field
-        FIELD_STORE,    // object.field = src
+        ARRAY_LOAD, // result = base[index]
+        ARRAY_STORE, // base[index] = src
+        FIELD_LOAD, // result = object.field
+        FIELD_STORE, // object.field = src
 
         // ── TAC control flow ─────────────────────────────────────────────────
-        LABEL,          // LABEL <name>                 branch target (no-op at runtime)
-        JUMP,           // goto <label>
-        JUMP_IF_TRUE,   // ifTrue  <cond> goto <label>
-        JUMP_IF_FALSE,  // ifFalse <cond> goto <label>
+        LABEL, // LABEL <name> branch target (no-op at runtime)
+        JUMP, // goto <label>
+        JUMP_IF_TRUE, // ifTrue <cond> goto <label>
+        JUMP_IF_FALSE, // ifFalse <cond> goto <label>
 
         // ── TAC methods / calls ──────────────────────────────────────────────
-        METHOD_START,   // begin method <name>:<returnType>
-        METHOD_END,     // end method <name>
-        PARAM,          // param <name>                 declare incoming parameter
-        ARG,            // arg <value>                  push one call argument
-        CALL,           // result = call <name> <argCount>   (static)
-        CALL_VIRTUAL,   // result = callvirtual <obj> <name> <argCount>
+        METHOD_START, // begin method <name>:<returnType>
+        METHOD_END, // end method <name>
+        PARAM, // param <name> declare incoming parameter
+        ARG, // arg <value> push one call argument
+        CALL, // result = call <name> <argCount> (static)
+        CALL_VIRTUAL, // result = callvirtual <obj> <name> <argCount>
         // §23.2: descriptor-carrying variants — preferred at all new call sites
-        CALL_DESC,          // result = call <name> <descriptor> <argCount>
-        CALL_VIRTUAL_DESC,  // result = callvirtual <obj> <name> <descriptor> <argCount>
-        RETURN,         // return
-        RETURN_VALUE,   // return <value>
+        CALL_DESC, // result = call <name> <descriptor> <argCount>
+        CALL_VIRTUAL_DESC, // result = callvirtual <obj> <name> <descriptor> <argCount>
+        RETURN, // return
+        RETURN_VALUE, // return <value>
 
         // ── TAC objects ───────────────────────────────────────────────────────
-        NEW,            // result = new <type>(<argCount args already emitted as ARG)
-        NEW_ARRAY,      // result = new <type>[size]
-        PRINT,          // print <argCount args already emitted as ARG>
+        NEW, // result = new <type>(<argCount args already emitted as ARG)
+        NEW_ARRAY, // result = new <type>[size]
+        PRINT, // print <argCount args already emitted as ARG>
         PRINTLN,
 
         // ── TAC class structure ───────────────────────────────────────────────
-        CLASS,          // class <name>
+        CLASS, // class <name>
         MAX_STACK,
         HALT,
         MAX_LOCALS,
         LDC,
         INTERN_STRING,
 
-        IADD, ISUB, IMUL, IDIV, IMOD,   // int / boolean / byte / short / char
-        LADD, LSUB, LMUL, LDIV, LMOD,   // long
-        FADD, FSUB, FMUL, FDIV, FMOD,   // float
-        DADD, DSUB, DMUL, DDIV, DMOD,   // double
+        IADD, ISUB, IMUL, IDIV, IMOD, // int / boolean / byte / short / char
+        LADD, LSUB, LMUL, LDIV, LMOD, // long
+        FADD, FSUB, FMUL, FDIV, FMOD, // float
+        DADD, DSUB, DMUL, DDIV, DMOD, // double
 
-        IAND, LOR, IXOR,                 // bitwise AND, OR, XOR (integer)
-        ISHL, ISHR, IUSHR,              // shift operations (logical/arithmetic shift right)
+        IAND, LOR, IXOR, // bitwise AND, OR, XOR (integer)
+        ISHL, ISHR, IUSHR, // shift operations (logical/arithmetic shift right)
 
-        ILOAD, LLOAD, FLOAD, DLOAD, ALOAD,    // local-variable loads
+        ILOAD, LLOAD, FLOAD, DLOAD, ALOAD, // local-variable loads
         ISTORE, LSTORE, FSTORE, DSTORE, ASTORE, // local-variable stores
-        
+
         IALOAD, LALOAD, FALOAD, DALOAD, AALOAD,
         IASTORE, LASTORE, FASTORE, DASTORE, AASTORE,
         IRETURN, LRETURN, FRETURN, DRETURN, ARETURN,
-        
+
         CONST_PUSH,
         STACK_MAP_FRAME,
         EXCEPTION_TABLE_ENTRY,
@@ -101,9 +101,9 @@ public final class Instruction {
 
     private final Opcode opcode;
     private final String result;
-    private final String arg1;  
-    private final String op;    
-    private final String arg2;  
+    private final String arg1;
+    private final String op;
+    private final String arg2;
     private final String descriptor;
 
     private Instruction(Opcode opcode, String result, String arg1, String op, String arg2) {
@@ -111,12 +111,12 @@ public final class Instruction {
     }
 
     private Instruction(Opcode opcode, String result, String arg1, String op, String arg2,
-                        String descriptor) {
-        this.opcode     = opcode;
-        this.result     = result;
-        this.arg1       = arg1;
-        this.op         = op;
-        this.arg2       = arg2;
+            String descriptor) {
+        this.opcode = opcode;
+        this.result = result;
+        this.arg1 = arg1;
+        this.op = op;
+        this.arg2 = arg2;
         this.descriptor = descriptor;
     }
 
@@ -197,14 +197,14 @@ public final class Instruction {
     }
 
     public static Instruction callWithDescriptor(String result, String name,
-                                                String descriptor, int argCount) {
+            String descriptor, int argCount) {
         return new Instruction(Opcode.CALL_DESC, result, name,
                 String.valueOf(argCount), null, descriptor);
     }
 
     public static Instruction callVirtualWithDescriptor(String result, String obj,
-                                                        String name, String descriptor,
-                                                        int argCount) {
+            String name, String descriptor,
+            int argCount) {
         return new Instruction(Opcode.CALL_VIRTUAL_DESC, result, obj,
                 name, String.valueOf(argCount), descriptor);
     }
@@ -262,7 +262,7 @@ public final class Instruction {
     }
 
     public static Instruction typedStore(Opcode opcode, String slot, String src) {
-        return new Instruction(opcode, null, slot, src, null);
+        return new Instruction(opcode, null, slot, null, src);
     }
 
     public static Instruction constPush(String result, String value, String mnemonic) {
@@ -274,7 +274,7 @@ public final class Instruction {
     }
 
     public static Instruction exceptionTableEntry(String startLabel, String endLabel,
-                                                String handlerLabel, String catchType) {
+            String handlerLabel, String catchType) {
         return new Instruction(Opcode.EXCEPTION_TABLE_ENTRY,
                 null, startLabel, endLabel, handlerLabel + ":" + catchType);
     }
@@ -329,47 +329,94 @@ public final class Instruction {
         return new Instruction(Opcode.METHOD_DESCRIPTOR, null, methodName, descriptor, null);
     }
 
-    public Opcode getOpcode()     { return opcode;     }
-    public String getResult()     { return result;     }
-    public String getArg1()       { return arg1;       }
-    public String getOp()         { return op;         }
-    public String getArg2()       { return arg2;       }
-    public String getDescriptor() { return descriptor; }
+    public Opcode getOpcode() {
+        return opcode;
+    }
+
+    public String getResult() {
+        return result;
+    }
+
+    public String getArg1() {
+        return arg1;
+    }
+
+    public String getOp() {
+        return op;
+    }
+
+    public String getArg2() {
+        return arg2;
+    }
+
+    public String getDescriptor() {
+        return descriptor;
+    }
 
     @Override
     public String toString() {
         switch (opcode) {
 
-            case LOAD_CONST:    return result + " = " + arg1;
-            case COPY:          return result + " = " + arg1;
+            case LOAD_CONST:
+                return result + " = " + arg1;
+            case COPY:
+                return result + " = " + arg1;
 
-            case ADD: case SUB: case MUL: case DIV: case MOD:
+            case ADD:
+            case SUB:
+            case MUL:
+            case DIV:
+            case MOD:
             case POW:
-            case EQUAL: case NOT_EQUAL:
-            case LESS_THAN: case LESS_EQUAL:
-            case GREATER_THAN: case GREATER_EQUAL:
-            case IAND: case LOR: case IXOR: case ISHL: case ISHR: case IUSHR:
+            case EQUAL:
+            case NOT_EQUAL:
+            case LESS_THAN:
+            case LESS_EQUAL:
+            case GREATER_THAN:
+            case GREATER_EQUAL:
+            case IAND:
+            case LOR:
+            case IXOR:
+            case ISHL:
+            case ISHR:
+            case IUSHR:
                 return result + " = " + arg1 + " " + op + " " + arg2;
 
-            case NEG:           return result + " = -" + arg1;
-            case NOT:           return result + " = !" + arg1;
-            case BITWISE_NOT:   return result + " = ~" + arg1;
-            case CAST:          return result + " = (" + op + ") " + arg1;
+            case NEG:
+                return result + " = -" + arg1;
+            case NOT:
+                return result + " = !" + arg1;
+            case BITWISE_NOT:
+                return result + " = ~" + arg1;
+            case CAST:
+                return result + " = (" + op + ") " + arg1;
 
-            case ARRAY_LOAD:    return result + " = " + arg1 + "[" + arg2 + "]";
-            case ARRAY_STORE:   return arg1 + "[" + op + "] = " + arg2;
-            case FIELD_LOAD:    return result + " = " + arg1 + "." + op;
-            case FIELD_STORE:   return arg1 + "." + op + " = " + arg2;
+            case ARRAY_LOAD:
+                return result + " = " + arg1 + "[" + arg2 + "]";
+            case ARRAY_STORE:
+                return arg1 + "[" + op + "] = " + arg2;
+            case FIELD_LOAD:
+                return result + " = " + arg1 + "." + op;
+            case FIELD_STORE:
+                return arg1 + "." + op + " = " + arg2;
 
-            case LABEL:         return (result != null ? result : arg1) + ":";
-            case JUMP:          return "goto " + arg1;
-            case JUMP_IF_TRUE:  return "ifTrue "  + arg1 + " goto " + op;
-            case JUMP_IF_FALSE: return "ifFalse " + arg1 + " goto " + op;
+            case LABEL:
+                return (result != null ? result : arg1) + ":";
+            case JUMP:
+                return "goto " + arg1;
+            case JUMP_IF_TRUE:
+                return "ifTrue " + arg1 + " goto " + op;
+            case JUMP_IF_FALSE:
+                return "ifFalse " + arg1 + " goto " + op;
 
-            case METHOD_START:  return "begin_method " + arg1 + ":" + op;
-            case METHOD_END:    return "end_method "   + arg1;
-            case PARAM:         return "param " + arg1;
-            case ARG:           return "arg " + arg1;
+            case METHOD_START:
+                return "begin_method " + arg1 + ":" + op;
+            case METHOD_END:
+                return "end_method " + arg1;
+            case PARAM:
+                return "param " + arg1;
+            case ARG:
+                return "arg " + arg1;
 
             case CALL:
                 return (result != null ? result + " = " : "") + "call " + arg1 + " " + op;
@@ -384,54 +431,115 @@ public final class Instruction {
                 return (result != null ? result + " = " : "")
                         + "callvirtual " + arg1 + " " + op + " " + descriptor + " (" + arg2 + " args)";
 
-            case RETURN:        return "return";
-            case RETURN_VALUE:  return "return " + arg1;
-            case NEW:           return result + " = new " + arg1 + "(" + op + " args)";
-            case NEW_ARRAY:     return result + " = new " + arg1 + "[" + arg2 + "]";
-            case PRINT:         return "print " + arg1;
-            case PRINTLN:       return "println " + arg1;
-            case CLASS:         return "class " + arg1;
+            case RETURN:
+                return "return";
+            case RETURN_VALUE:
+                return "return " + arg1;
+            case NEW:
+                return result + " = new " + arg1 + "(" + op + " args)";
+            case NEW_ARRAY:
+                return result + " = new " + arg1 + "[" + arg2 + "]";
+            case PRINT:
+                return "print " + arg1;
+            case PRINTLN:
+                return "println " + arg1;
+            case CLASS:
+                return "class " + arg1;
 
-            case MAX_STACK:     return ".maxstack " + op + "  ; method=" + arg1;
-            case MAX_LOCALS:    return ".maxlocals " + op + "  ; method=" + arg1;
+            case MAX_STACK:
+                return ".maxstack " + op + "  ; method=" + arg1;
+            case MAX_LOCALS:
+                return ".maxlocals " + op + "  ; method=" + arg1;
 
-            case LDC:           return result + " = ldc #" + arg1;
-            case INTERN_STRING: return "pool[" + result + "] = intern(\"" + arg1 + "\")";
+            case LDC:
+                return result + " = ldc #" + arg1;
+            case INTERN_STRING:
+                return "pool[" + result + "] = intern(\"" + arg1 + "\")";
 
-            case IADD: case ISUB: case IMUL: case IDIV: case IMOD:
-            case LADD: case LSUB: case LMUL: case LDIV: case LMOD:
-            case FADD: case FSUB: case FMUL: case FDIV: case FMOD:
-            case DADD: case DSUB: case DMUL: case DDIV: case DMOD:
+            case IADD:
+            case ISUB:
+            case IMUL:
+            case IDIV:
+            case IMOD:
+            case LADD:
+            case LSUB:
+            case LMUL:
+            case LDIV:
+            case LMOD:
+            case FADD:
+            case FSUB:
+            case FMUL:
+            case FDIV:
+            case FMOD:
+            case DADD:
+            case DSUB:
+            case DMUL:
+            case DDIV:
+            case DMOD:
                 return result + " = " + arg1 + " " + opcode.name().toLowerCase() + " " + arg2;
 
-            case ILOAD: case LLOAD: case FLOAD: case DLOAD: case ALOAD:
+            case ILOAD:
+            case LLOAD:
+            case FLOAD:
+            case DLOAD:
+            case ALOAD:
                 return result + " = " + opcode.name().toLowerCase() + " [" + arg1 + "]";
-            case ISTORE: case LSTORE: case FSTORE: case DSTORE: case ASTORE:
+            case ISTORE:
+            case LSTORE:
+            case FSTORE:
+            case DSTORE:
+            case ASTORE:
                 return opcode.name().toLowerCase() + " [" + arg1 + "] = " + op;
-            case IALOAD: case LALOAD: case FALOAD: case DALOAD: case AALOAD:
+            case IALOAD:
+            case LALOAD:
+            case FALOAD:
+            case DALOAD:
+            case AALOAD:
                 return result + " = " + arg1 + "[" + arg2 + "]  ; " + opcode.name().toLowerCase();
-            case IASTORE: case LASTORE: case FASTORE: case DASTORE: case AASTORE:
+            case IASTORE:
+            case LASTORE:
+            case FASTORE:
+            case DASTORE:
+            case AASTORE:
                 return arg1 + "[" + op + "] = " + arg2 + "  ; " + opcode.name().toLowerCase();
-            case IRETURN: case LRETURN: case FRETURN: case DRETURN: case ARETURN:
+            case IRETURN:
+            case LRETURN:
+            case FRETURN:
+            case DRETURN:
+            case ARETURN:
                 return opcode.name().toLowerCase() + " " + arg1;
 
-            case CONST_PUSH:            return result + " = " + op + "  ; const_push(" + arg1 + ")";
-            case STACK_MAP_FRAME:       return ".stack_map " + arg1 + " { " + op + " }";
-            case EXCEPTION_TABLE_ENTRY: return ".exception [" + arg1 + ", " + op + ") -> " + arg2;
-            case CONVERT:               return result + " = " + op + "(" + arg1 + ")";
-            case FOLDED_CONST:          return result + " = " + arg1 + "  ; folded";
+            case CONST_PUSH:
+                return result + " = " + op + "  ; const_push(" + arg1 + ")";
+            case STACK_MAP_FRAME:
+                return ".stack_map " + arg1 + " { " + op + " }";
+            case EXCEPTION_TABLE_ENTRY:
+                return ".exception [" + arg1 + ", " + op + ") -> " + arg2;
+            case CONVERT:
+                return result + " = " + op + "(" + arg1 + ")";
+            case FOLDED_CONST:
+                return result + " = " + arg1 + "  ; folded";
 
-            case DUP:           return (result != null ? result + " = " : "") + "dup";
+            case DUP:
+                return (result != null ? result + " = " : "") + "dup";
 
-            case LINE_NUMBER:           return ".line " + op + "  ; offset=" + arg1;
-            case LOCAL_VAR_TABLE:       return ".local [" + arg1 + "] " + op + " : " + arg2;
-            case SOURCE_FILE:           return ".source \"" + arg1 + "\"";
-            case DEFAULT_CONSTRUCTOR:   return "begin_method <init>:" + arg1 + "  ; synthesised";
-            case STATIC_INIT:           return "begin_method <clinit>:" + arg1;
-            case FIELD_DEFAULT:         return ".field_default " + arg1 + " : " + op;
-            case METHOD_DESCRIPTOR:     return ".descriptor " + arg1 + " " + op;
+            case LINE_NUMBER:
+                return ".line " + op + "  ; offset=" + arg1;
+            case LOCAL_VAR_TABLE:
+                return ".local [" + arg1 + "] " + op + " : " + arg2;
+            case SOURCE_FILE:
+                return ".source \"" + arg1 + "\"";
+            case DEFAULT_CONSTRUCTOR:
+                return "begin_method <init>:" + arg1 + "  ; synthesised";
+            case STATIC_INIT:
+                return "begin_method <clinit>:" + arg1;
+            case FIELD_DEFAULT:
+                return ".field_default " + arg1 + " : " + op;
+            case METHOD_DESCRIPTOR:
+                return ".descriptor " + arg1 + " " + op;
 
-            default: return opcode.name();
+            default:
+                return opcode.name();
         }
     }
 }
