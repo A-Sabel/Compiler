@@ -357,6 +357,8 @@ public class MainGUI2 extends JFrame {
     private int warnCount = 0;
     private int currentFontSize = 13;
     private enum Theme { BLUE, PINK, VIOLET, RED }
+    private boolean isAutoSaveEnabled = false;
+    private static final String AUTOSAVE_FILE = "autosave_backup.java";
     private Theme currentTheme = Theme.BLUE;
     private String activeConsoleTab = "Console";
 
@@ -415,8 +417,14 @@ public class MainGUI2 extends JFrame {
         if (savedCode != null && !savedCode.isEmpty()) {
             codeEditor.setText(savedCode);
         } else {
-            codeEditor.setText(
-                    "//input code here\n");
+            File backup = new File(AUTOSAVE_FILE);
+            if (backup.exists()) {
+                try (BufferedReader br = new BufferedReader(new FileReader(backup))) {
+                    codeEditor.read(br, null);
+                } catch (IOException ignored) {}
+            } else {
+                codeEditor.setText("//input code here\n");
+            }
         }
         applySyntaxHighlighting(); // Initial highlighting
 
@@ -815,10 +823,12 @@ public class MainGUI2 extends JFrame {
         codeEditor.getDocument().addDocumentListener(new DocumentListener() {
             public void insertUpdate(DocumentEvent e) {
                 applySyntaxHighlighting();
+                performAutoSave();
             }
 
             public void removeUpdate(DocumentEvent e) {
                 applySyntaxHighlighting();
+                performAutoSave();
             }
 
             public void changedUpdate(DocumentEvent e) {
@@ -1922,6 +1932,37 @@ public class MainGUI2 extends JFrame {
         });
         content.add(themeBox);
 
+        content.add(Box.createVerticalStrut(20));
+        JLabel autoSaveTitle = new JLabel("Persistence");
+        autoSaveTitle.setFont(FONT_UI_B);
+        autoSaveTitle.setForeground(labelFg());
+        content.add(autoSaveTitle);
+        content.add(Box.createVerticalStrut(10));
+        
+        content.add(createSettingsCheckbox("Enable Auto-Save", isAutoSaveEnabled, e -> {
+            isAutoSaveEnabled = ((JCheckBox) e.getSource()).isSelected();
+            if (isAutoSaveEnabled) performAutoSave();
+        }));
+
+        content.add(Box.createVerticalStrut(25));
+        JButton restoreBtn = buildSmallActionBtn("Restore Defaults");
+        restoreBtn.setPreferredSize(new Dimension(130, 30));
+        restoreBtn.addActionListener(e -> {
+            // Reset all settings to default values
+            isDarkMode = true;
+            currentFontSize = 13;
+            currentTheme = Theme.BLUE;
+            isAutoSaveEnabled = false;
+            showConsoleTab = showErrorsTab = showWarningsTab = true;
+            showRuntimeTab = showSymbolTab = showGeneratedTab = true;
+            
+            // Refresh UI and Close Dialog
+            applyTheme();
+            dialog.dispose();
+            logAction("Settings restored to factory defaults.", INFO_BLUE);
+        });
+        content.add(restoreBtn);
+
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         actions.setBackground(bgLight());
         JButton applyBtn = new JButton("Apply");
@@ -1944,6 +1985,16 @@ public class MainGUI2 extends JFrame {
         dialog.setSize(320, 450);
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
+    }
+
+    private void performAutoSave() {
+        if (!isAutoSaveEnabled || codeEditor == null) return;
+        // Save to temporary file in a separate thread to keep UI smooth
+        new Thread(() -> {
+            try (FileWriter fw = new FileWriter(AUTOSAVE_FILE)) {
+                fw.write(codeEditor.getText());
+            } catch (IOException ignored) {}
+        }).start();
     }
 
     private void applyTheme() {
