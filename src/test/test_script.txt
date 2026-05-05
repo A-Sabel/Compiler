@@ -239,3 +239,16 @@ void main() {
     System.out.println("Seconds: " + secondsInDay + ", FastMul: " + fastMul);
 }
 ------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+// --- 21. Lambda Expressions (Anonymous Methods) ---
+void main() {
+    System.out.println("\n--- 21. Lambdas ---");
+    
+    // Declare a lambda expression
+    var multiplier = (int a, int b) -> a * b;
+    
+    // Execute the synthesized lambda method dynamically
+    System.out.println("Lambda result (5 * 4): " + multiplier(5, 4));
+}
+------------------------------------------------------------------------- */

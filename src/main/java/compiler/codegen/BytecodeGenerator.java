@@ -120,6 +120,8 @@ public class BytecodeGenerator {
     private boolean unreachable = false;
     private Map<String, String> methodVarTypes = null;
     private final Map<String, String> cseResultMap = new HashMap<>();
+    private int lambdaCounter = 1;
+    private final List<ASTNode> pendingLambdas = new ArrayList<>();
 
     public void setSourceFileName(String name) {
         this.sourceFileName = name;
@@ -136,6 +138,8 @@ public class BytecodeGenerator {
         currentBreakLabel = null;
         currentContinueLabel = null;
         cseResultMap.clear();
+        lambdaCounter = 1;
+        pendingLambdas.clear();
         unreachable = false;
         visit(root);
         applyPeepholeOptimizations();
@@ -545,6 +549,49 @@ public class BytecodeGenerator {
         emit(Instruction.fieldDefault(fieldName, jvmType));
     }
 
+    private void generateLambdaMethod(ASTNode node) {
+        String name = node.getAttribute("lambda_name");
+        String returnType = "Object";
+
+        slotAllocator.reset(false);
+        stackTracker.reset();
+
+        List<String> paramTypes = new ArrayList<>();
+        ASTNode params = getChildOfType(node, "PARAMS");
+        if (params != null) {
+            for (ASTNode param : params.getChildren()) {
+                String pType = getChildValue(param, "TYPE");
+                paramTypes.add(pType != null && !pType.equals("var") ? pType : "Object");
+            }
+        }
+        String descriptor = buildMethodDescriptor(paramTypes, returnType);
+
+        emit(Instruction.methodStart(name, returnType));
+        emit(Instruction.methodDescriptor(name, descriptor));
+
+        Map<String, String> varTypes = new HashMap<>();
+        if (params != null) {
+            for (ASTNode param : params.getChildren()) {
+                String pName = getChildValue(param, "NAME");
+                String pType = getChildValue(param, "TYPE");
+                String jvmT = toJvmDescriptor(pType != null && !pType.equals("var") ? pType : "Object");
+                slotAllocator.allocate(pName, jvmT);
+                varTypes.put(pName, jvmT);
+                emit(Instruction.param(pName));
+            }
+        }
+
+        unreachable = false;
+        methodVarTypes = varTypes;
+        visitChildOfType(node, "BODY");
+        methodVarTypes = null;
+        unreachable = false;
+        emit(Instruction.maxStack(name, stackTracker.maxDepth()));
+        emit(Instruction.maxLocals(name, slotAllocator.maxLocals()));
+        emitLocalVarTable(varTypes);
+        emit(Instruction.methodEnd(name));
+    }
+
     private void emitLocalVarTable(Map<String, String> varTypes) {
         for (Map.Entry<String, Integer> e : slotAllocator.allSlots().entrySet()) {
             String name = e.getKey();
@@ -563,6 +610,7 @@ public class BytecodeGenerator {
             case "PROGRAM":
                 for (ASTNode child : node.getChildren())
                     visit(child);
+                flushPendingLambdas();
                 return null;
 
             case "CLASS_DECL": {
@@ -601,6 +649,7 @@ public class BytecodeGenerator {
                             visit(child);
                     }
                 }
+                flushPendingLambdas();
                 if (!hasConstructor)
                     synthesizeDefaultConstructor(name);
                 currentClassName = null;
@@ -671,6 +720,8 @@ public class BytecodeGenerator {
             case "VAR_DECL":
                 handleVarDecl(node);
                 return null;
+            case "LAMBDA":
+                return handleLambda(node);
 
             case "TRY_STMT":
                 handleTry(node);
@@ -787,6 +838,22 @@ public class BytecodeGenerator {
             default:
                 throw new RuntimeException("Unknown node type: " + node.getType());
         }
+    }
+
+    private String handleLambda(ASTNode node) {
+        String lambdaName = "lambda$" + (lambdaCounter++);
+        node.setAttribute("lambda_name", lambdaName);
+        pendingLambdas.add(node);
+        String result = newTemp();
+        emitSpecializedConst(result, "\"" + lambdaName + "\"", "Ljava/lang/String;");
+        return result;
+    }
+
+    private void flushPendingLambdas() {
+        for (int i = 0; i < pendingLambdas.size(); i++) {
+            generateLambdaMethod(pendingLambdas.get(i));
+        }
+        pendingLambdas.clear();
     }
 
     private void handleMethodDecl(ASTNode node) {
@@ -1470,9 +1537,15 @@ public class BytecodeGenerator {
 
     private String handleMethodCall(ASTNode node) {
         String methodName = node.getValue();
+        int slot = slotAllocator.slotOf(methodName);
+        String callTarget = methodName;
+        if (slot >= 0) {
+            callTarget = newTemp();
+            emit(Instruction.typedLoad(Opcode.ALOAD, callTarget, String.valueOf(slot)));
+        }
 
         // Check if this is a built-in function
-        if ("print".equals(methodName) || "pow".equals(methodName)) {
+        if ("print".equals(callTarget) || "pow".equals(callTarget)) {
             ASTNode args = getChildOfType(node, "ARGS");
             int argCount = 0;
             if (args != null) {
@@ -1485,12 +1558,12 @@ public class BytecodeGenerator {
             }
 
             String result = newTemp();
-            if ("print".equals(methodName)) {
+            if ("print".equals(callTarget)) {
                 emit(Instruction.print(argCount));
                 stackTracker.pop(argCount);
             } else {
                 // pow function
-                emit(Instruction.call(result, methodName, argCount));
+                emit(Instruction.call(result, callTarget, argCount));
                 stackTracker.pop(argCount);
                 stackTracker.push();
             }
@@ -1542,13 +1615,11 @@ public class BytecodeGenerator {
         String descriptor = buildMethodDescriptorFromJvmTypes(argTypes, toJvmDescriptor(returnType));
 
         String result = newTemp();
-        if (!isStatic) {
-            // Instance method: always use virtual call (with explicit or implicit receiver)
-            emit(Instruction.callVirtualWithDescriptor(result, objAddr, methodName, descriptor, argCount));
+        if (!isStatic && slot < 0) {
+            emit(Instruction.callVirtualWithDescriptor(result, objAddr, callTarget, descriptor, argCount));
             stackTracker.pop(argCount + 1); // receiver + arguments
         } else {
-            // Static method: use regular call
-            emit(Instruction.callWithDescriptor(result, methodName, descriptor, argCount));
+            emit(Instruction.callWithDescriptor(result, callTarget, descriptor, argCount));
             stackTracker.pop(argCount);
         }
         stackTracker.push(); // return value (even void methods push a placeholder temp)

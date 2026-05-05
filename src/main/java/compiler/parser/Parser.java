@@ -694,7 +694,97 @@ public class Parser {
     // ═════════════════════════════════════════════════════════════════════════
 
     private ASTNode parseExpression() {
+        if (isLambdaStart()) {
+            return parseLambda();
+        }
         return parseAssignment();
+    }
+
+    private boolean isLambdaStart() {
+        // Case 1: identifier -> ...
+        if (currentType() != null && currentType().equals("IDENTIFIER")) {
+            Tokens t1 = peek(1);
+            if (t1 != null && t1.getLexeme().equals("-")) {
+                Tokens t2 = peek(2);
+                if (t2 != null && t2.getLexeme().equals(">")) return true;
+            }
+            if (t1 != null && t1.getLexeme().equals("->")) return true;
+        }
+        // Case 2: (a, b) -> ...
+        if (check("SPECIAL_CHAR", "(")) {
+            int i = 1;
+            while (peek(i) != null && !peek(i).getLexeme().equals(")") && !peek(i).getLexeme().equals(";")) {
+                i++;
+            }
+            if (peek(i) != null && peek(i).getLexeme().equals(")")) {
+                Tokens t1 = peek(i + 1);
+                if (t1 != null && t1.getLexeme().equals("-")) {
+                    Tokens t2 = peek(i + 2);
+                    if (t2 != null && t2.getLexeme().equals(">")) return true;
+                }
+                if (t1 != null && t1.getLexeme().equals("->")) return true;
+            }
+        }
+        return false;
+    }
+
+    private ASTNode parseLambda() {
+        Tokens t = current();
+        ASTNode lambdaNode = ASTNode.of("LAMBDA", "", t.getLine(), t.getColumn());
+        ASTNode paramsNode = ASTNode.of("PARAMS");
+
+        if (check("SPECIAL_CHAR", "(")) {
+            advance();
+            if (!check("SPECIAL_CHAR", ")")) {
+                do {
+                    String pType = "var";
+                    if (isTypeKeyword() || isPotentialTypeTypo() || 
+                       (currentType().equals("IDENTIFIER") && peek(1) != null && peek(1).getType().equals("IDENTIFIER"))) {
+                        pType = currentLexeme();
+                        advance();
+                        parseGenericTypeParams();
+                    }
+                    String pName = currentLexeme();
+                    consume("IDENTIFIER", pName);
+                    ASTNode param = ASTNode.of("PARAM");
+                    param.addChild(ASTNode.of("TYPE", pType));
+                    param.addChild(ASTNode.of("NAME", pName));
+                    paramsNode.addChild(param);
+                } while (matchAndAdvance("PUNCTUATION", ","));
+            }
+            consume("SPECIAL_CHAR", ")");
+        } else {
+            String pName = currentLexeme();
+            consume("IDENTIFIER", pName);
+            ASTNode param = ASTNode.of("PARAM");
+            param.addChild(ASTNode.of("TYPE", "var"));
+            param.addChild(ASTNode.of("NAME", pName));
+            paramsNode.addChild(param);
+        }
+
+        // Consume arrow '->' safely regardless of Lexer configuration
+        if (check("OPERATOR", "->") || check("PUNCTUATION", "->")) {
+            advance();
+        } else {
+            consume("OPERATOR", "-");
+            if (check("OPERATOR", ">")) advance();
+            else consume("PUNCTUATION", ">");
+        }
+
+        lambdaNode.addChild(paramsNode);
+        ASTNode bodyWrapper = ASTNode.of("BODY");
+        if (check("SPECIAL_CHAR", "{")) {
+            bodyWrapper.addChild(parseBlock());
+        } else {
+            ASTNode expr = parseExpression();
+            ASTNode returnStmt = ASTNode.of("RETURN");
+            returnStmt.addChild(expr);
+            ASTNode block = ASTNode.of("BLOCK");
+            block.addChild(returnStmt);
+            bodyWrapper.addChild(block);
+        }
+        lambdaNode.addChild(bodyWrapper);
+        return lambdaNode;
     }
 
     private ASTNode parseAssignment() {

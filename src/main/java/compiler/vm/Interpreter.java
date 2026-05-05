@@ -314,7 +314,9 @@ public class Interpreter {
                     case CALL_DESC: {
                         int argCount = parseArgCount(instr.getOp());
                         List<Object> args = consumeArgs(context, argCount);
-                        String name = instr.getArg1();
+                        String rawName = instr.getArg1();
+                        Object resolved = resolveValue(rawName, context);
+                        String name = (resolved instanceof String) ? (String) resolved : rawName;
                         Object returnValue = invokeCall(instructions, name, instr.getDescriptor(), false, null, args);
                         if (instr.getResult() != null) {
                             context.temps.put(instr.getResult(), returnValue);
@@ -326,8 +328,11 @@ public class Interpreter {
                     case CALL_VIRTUAL_DESC: {
                         int argCount = parseArgCount(instr.getArg2());
                         List<Object> args = consumeArgs(context, argCount);
+                        String rawName = instr.getOp();
+                        Object resolved = resolveValue(rawName, context);
+                        String name = (resolved instanceof String) ? (String) resolved : rawName;
                         Object receiver = resolveValue(instr.getArg1(), context);
-                        Object returnValue = invokeCall(instructions, instr.getOp(), instr.getDescriptor(), true,
+                        Object returnValue = invokeCall(instructions, name, instr.getDescriptor(), true,
                                 receiver, args);
                         if (instr.getResult() != null) {
                             context.temps.put(instr.getResult(), returnValue);
@@ -373,10 +378,14 @@ public class Interpreter {
                         String mnemonic = instr.getOp();
                         Object converted = n;
                         if (mnemonic != null) {
-                            if (mnemonic.endsWith("2I")) converted = n.intValue();
-                            else if (mnemonic.endsWith("2D")) converted = n.doubleValue();
-                            else if (mnemonic.endsWith("2F")) converted = n.floatValue();
-                            else if (mnemonic.endsWith("2J")) converted = n.longValue();
+                            if (mnemonic.endsWith("2I"))
+                                converted = n.intValue();
+                            else if (mnemonic.endsWith("2D"))
+                                converted = n.doubleValue();
+                            else if (mnemonic.endsWith("2F"))
+                                converted = n.floatValue();
+                            else if (mnemonic.endsWith("2J"))
+                                converted = n.longValue();
                         }
                         context.temps.put(instr.getResult(), converted);
                         break;
@@ -678,20 +687,35 @@ public class Interpreter {
     }
 
     private String unescape(String s) {
-        if (s == null) return null;
+        if (s == null)
+            return null;
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
             if (c == '\\' && i + 1 < s.length()) {
                 char next = s.charAt(i + 1);
                 switch (next) {
-                    case 'n': sb.append('\n'); break;
-                    case 't': sb.append('\t'); break;
-                    case 'r': sb.append('\r'); break;
-                    case '"': sb.append('\"'); break;
-                    case '\'': sb.append('\''); break;
-                    case '\\': sb.append('\\'); break;
-                    default: sb.append('\\').append(next); break;
+                    case 'n':
+                        sb.append('\n');
+                        break;
+                    case 't':
+                        sb.append('\t');
+                        break;
+                    case 'r':
+                        sb.append('\r');
+                        break;
+                    case '"':
+                        sb.append('\"');
+                        break;
+                    case '\'':
+                        sb.append('\'');
+                        break;
+                    case '\\':
+                        sb.append('\\');
+                        break;
+                    default:
+                        sb.append('\\').append(next);
+                        break;
                 }
                 i++;
             } else {
@@ -768,6 +792,7 @@ public class Interpreter {
 
     private static final class VmException extends RuntimeException {
         final Object exceptionObject;
+
         VmException(Object exceptionObject) {
             super(exceptionObject != null ? exceptionObject.toString() : "null");
             this.exceptionObject = exceptionObject;

@@ -15,6 +15,7 @@ public class SemanticAnalyzer {
     private final SymbolTable symbolTable;
 
     private String currentMethodReturnType = null;
+    private int lambdaDepth = 0;
 
     private int loopDepth = 0;
     private boolean isReachable = true;
@@ -515,13 +516,23 @@ public class SemanticAnalyzer {
 
             String initType = inferExpressionType(initExpr);
 
+            // 'var' is inferred from its initializer.
+            if ("var".equals(type) && initType != null && !"type_error".equals(initType)) {
+                type = initType;
+            }
+
             if (initType != null && !initType.equals("type_error")
+                    && !"var".equals(typeNode.getValue())
                     && !isTypeCompatible(type, initType)) {
                 ErrorHandler.report(
                         "Semantic Error: Type mismatch in initialization. Variable '" + name
                                 + "' is " + type + " but initialized with " + initType + ".",
                         initExpr.getLine(), initExpr.getColumn());
             }
+        } else if ("var".equals(type)) {
+            ErrorHandler.report(
+                    "Semantic Error: 'var' declarations must have an initializer.",
+                    node.getLine(), node.getColumn());
         }
 
         symbolTable.defineVariable(name, type);
@@ -641,6 +652,15 @@ public class SemanticAnalyzer {
         if (currentMethodReturnType == null) {
             ErrorHandler.report("Semantic Error: return statement outside of method.",
                     node.getLine(), node.getColumn());
+            return;
+        }
+
+        // Return statements inside lambda bodies are checked structurally, not
+        // against the enclosing method's return type.
+        if (lambdaDepth > 0) {
+            if (!node.getChildren().isEmpty()) {
+                inferExpressionType(node.getChildren().get(0));
+            }
             return;
         }
 
@@ -881,6 +901,15 @@ public class SemanticAnalyzer {
                 List<SymbolTable.MethodSignature> possibleMethods = symbolTable.lookupMethods(methodName);
 
                 if (possibleMethods == null || possibleMethods.isEmpty()) {
+                    // Check if it's a variable acting as a Lambda function pointer
+                    String varType = symbolTable.lookupVariableType(methodName);
+                    if (varType != null) {
+                        if (!varUsage.isEmpty())
+                            varUsage.peek().add(methodName);
+                        expr.setAttribute("resolved_return_type", "Object");
+                        return "Object";
+                    }
+
                     ErrorHandler.report(
                             "Semantic Error: Call to undefined method '" + methodName + "'.",
                             expr.getLine(), expr.getColumn());
@@ -1016,6 +1045,42 @@ public class SemanticAnalyzer {
                     return "type_error";
                 }
                 return targetType;
+
+            case "LAMBDA": {
+                symbolTable.enterScope();
+                varDeclarations.push(new HashMap<>());
+                varUsage.push(new HashSet<>());
+                lambdaDepth++;
+
+                ASTNode params = null;
+                ASTNode body = null;
+                for (ASTNode child : expr.getChildren()) {
+                    if (child.getType().equals("PARAMS"))
+                        params = child;
+                    if (child.getType().equals("BODY"))
+                        body = child;
+                }
+
+                if (params != null) {
+                    for (ASTNode param : params.getChildren()) {
+                        String pType = param.getChildren().get(0).getValue();
+                        String pName = param.getChildren().get(1).getValue();
+                        symbolTable.defineVariable(pName, pType);
+                        varDeclarations.peek().put(pName, new VarInfo(pType, param.getLine(), param.getColumn()));
+                    }
+                }
+
+                if (body != null) {
+                    analyze(body);
+                }
+
+                checkUnusedVariables();
+                varDeclarations.pop();
+                varUsage.pop();
+                lambdaDepth--;
+                symbolTable.exitScope();
+                return "Lambda";
+            }
 
             case "NEW":
                 for (ASTNode child : expr.getChildren()) {

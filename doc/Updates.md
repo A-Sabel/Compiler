@@ -134,9 +134,7 @@
 ---
 
 ## ⚠️ Out of Scope / Future Work
-
-- Lambda expressions
-
+*(None! All planned features are completed!)*
 ---
 
 ## 🎯 Recent Improvements (May 5, 2026)
@@ -154,6 +152,7 @@
 - Added `"String"` to recognized type keywords in `isTypeKeyword()`
 - Implemented intelligent type typo detection using Levenshtein edit distance
 - Added **Generic Types Support**, cleanly parsing and performing Type Erasure on constructs like `class Box<T>`, `List<String>`, and the diamond operator `<>`.
+- Added **Lambda Expressions Support** (`(a, b) -> a + b`), implementing method synthesis generation to translate anonymous closures into JVM-compliant static methods.
   - Example: `nt a = 10;` → suggests `int` with edit distance ≤ 1
 - Error recovery with panic mode for graceful failure handling
 

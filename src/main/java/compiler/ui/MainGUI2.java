@@ -398,6 +398,16 @@ public class MainGUI2 extends JFrame {
     private Theme currentTheme = Theme.BLUE;
     private String activeConsoleTab = "Console";
 
+    // Indentation settings (configurable)
+    private int indentSize = 4;
+    private boolean indentWithTabs = false;
+
+    private String getIndentUnit() {
+        if (indentWithTabs)
+            return "\t";
+        return " ".repeat(Math.max(0, indentSize));
+    }
+
     private JLabel consoleTabBtn;
 
     // AST tree model — reset on each run
@@ -435,6 +445,55 @@ public class MainGUI2 extends JFrame {
             @Override
             public boolean getScrollableTracksViewportWidth() {
                 return getUI().getPreferredSize(this).width <= getParent().getSize().width;
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                try {
+                    Graphics2D g2 = (Graphics2D) g.create();
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    FontMetrics fm = g2.getFontMetrics(getFont());
+                    javax.swing.text.Document doc = getDocument();
+                    javax.swing.text.Element root = doc.getDefaultRootElement();
+                    Rectangle vis = getVisibleRect();
+                    int lineH = fm.getHeight();
+                    int startLine = Math.max(0, vis.y / lineH);
+                    int endLine = Math.min(root.getElementCount() - 1, (vis.y + vis.height) / lineH + 1);
+                    for (int i = startLine; i <= endLine; i++) {
+                        int lineStart = root.getElement(i).getStartOffset();
+                        int lineEnd = root.getElement(i).getEndOffset();
+                        String lineText = doc.getText(lineStart, Math.max(0, lineEnd - lineStart));
+                        int col = 0;
+                        for (int p = 0; p < lineText.length();) {
+                            char c = lineText.charAt(p);
+                            if (c == ' ') {
+                                col++;
+                                p++;
+                            } else if (c == '\t') {
+                                col += 4;
+                                p++;
+                            } else
+                                break;
+                        }
+                        int guides = col / 4;
+                        for (int gi = 0; gi < guides; gi++) {
+                            int charOffset = gi * 4;
+                            try {
+                                javax.swing.text.Position pos = getDocument().createPosition(lineStart + charOffset);
+                                Rectangle r = modelToView(pos.getOffset());
+                                int x = r.x;
+                                int y1 = Math.max(vis.y, i * lineH);
+                                int y2 = Math.min(vis.y + vis.height, (i + 1) * lineH);
+                                g2.setColor(new Color(100, 100, 100, 40));
+                                g2.drawLine(x, y1, x, y2);
+                            } catch (BadLocationException ex) {
+                            }
+                        }
+                    }
+                    g2.dispose();
+                } catch (Exception ignored) {
+                }
             }
         };
 
@@ -895,7 +954,11 @@ public class MainGUI2 extends JFrame {
             }
         });
 
-        LineNumberComponent lnc = new LineNumberComponent(codeEditor, lineNumBg(), lineNumFg(), border());
+        // Setup editor indentation behavior (Enter, Tab, Shift-Tab)
+        setupEditorIndentation();
+
+        LineNumberComponent lnc = new LineNumberComponent(codeEditor, lineNumBg(), lineNumFg(), border(), indentSize,
+                indentWithTabs);
         JScrollPane scroll = new JScrollPane(codeEditor);
         scroll.setRowHeaderView(lnc);
         scroll.setBorder(null);
@@ -922,17 +985,14 @@ public class MainGUI2 extends JFrame {
                 StyleConstants.setFontSize(defaultAttr, currentFontSize);
                 doc.setCharacterAttributes(0, text.length(), defaultAttr, true);
 
-                // 2. Comments first (lowest visual priority)
-                highlightRegex(text, doc, "//[^\r\n]*|/\\*.*?\\*/", syntaxComment());
-
-                // 3. Strings and numbers
+                // 2. Strings and numbers
                 highlightRegex(text, doc, "\"([^\"]|\\\\\")*\"", syntaxString());
                 highlightRegex(text, doc, "\\b\\d+(\\.\\d+)?\\b", syntaxNumber());
 
-                // 4. Annotations
+                // 3. Annotations
                 highlightRegex(text, doc, "@[a-zA-Z_]\\w*", syntaxAnnotation());
 
-                // 5. Control-flow and language keywords
+                // 4. Control-flow and language keywords
                 highlightRegex(text, doc,
                         "\\b(if|else|while|for|do|break|continue|return|try|catch|throw|switch|case|default)\\b",
                         syntaxControl());
@@ -943,11 +1003,14 @@ public class MainGUI2 extends JFrame {
                         "\\b(int|double|float|boolean|char|void|var|String|long|short|byte)\\b",
                         syntaxType());
 
-                // 6. Declarations and method calls (kept minimal to avoid noisy colors)
+                // 5. Declarations and method calls (kept minimal to avoid noisy colors)
                 highlightRegex(text, doc, "\\b(class|interface|enum)\\s+([A-Z_]\\w*)\\b", syntaxType());
                 highlightRegex(text, doc,
                         "\\b(?!if\\b|else\\b|while\\b|for\\b|switch\\b|catch\\b|return\\b|new\\b)([a-zA-Z_]\\w*)\\s*(?=\\()",
                         syntaxMethod());
+
+                // 6. Comments last so they stay one consistent color
+                highlightRegex(text, doc, "//[^\r\n]*|/\\*.*?\\*/", syntaxComment());
             } catch (Exception ignored) {
             }
         });
@@ -1142,6 +1205,148 @@ public class MainGUI2 extends JFrame {
             addTabToOutput(2, symbolTableTabPanel);
         if (showGeneratedTab)
             addTabToOutput(3, generatedCodeTabPanel);
+    }
+
+    // ── Editor Indentation Support ───────────────────────────────────────
+    private void setupEditorIndentation() {
+        codeEditor.setFont(FONT_MONO);
+
+        // ENTER: insert newline plus copy of leading whitespace from current line
+        codeEditor.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("ENTER"), "insert-newline-with-indent");
+        codeEditor.getActionMap().put("insert-newline-with-indent", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                try {
+                    StyledDocument doc = codeEditor.getStyledDocument();
+                    int pos = codeEditor.getCaretPosition();
+                    javax.swing.text.Element root = doc.getDefaultRootElement();
+                    int line = root.getElementIndex(pos);
+                    int lineStart = root.getElement(line).getStartOffset();
+                    int lineEnd = root.getElement(line).getEndOffset();
+                    String lineText = doc.getText(lineStart, Math.max(0, lineEnd - lineStart));
+                    // compute leading whitespace
+                    StringBuilder lead = new StringBuilder();
+                    for (int i = 0; i < lineText.length(); i++) {
+                        char c = lineText.charAt(i);
+                        if (c == ' ' || c == '\t')
+                            lead.append(c);
+                        else
+                            break;
+                    }
+                    String insert = "\n" + lead.toString();
+                    doc.insertString(pos, insert, null);
+                    codeEditor.setCaretPosition(pos + insert.length());
+                } catch (BadLocationException ex) {
+                    // fallback to default enter
+                    codeEditor.replaceSelection("\n");
+                }
+                applySyntaxHighlighting();
+            }
+        });
+
+        // TAB: indent selection or insert indent unit
+        codeEditor.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("TAB"), "editor-indent");
+        codeEditor.getActionMap().put("editor-indent", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                try {
+                    StyledDocument doc = codeEditor.getStyledDocument();
+                    int selStart = codeEditor.getSelectionStart();
+                    int selEnd = codeEditor.getSelectionEnd();
+                    if (selStart == selEnd) {
+                        // no selection: insert indent unit
+                        String indent = getIndentUnit();
+                        doc.insertString(selStart, indent, null);
+                        codeEditor.setCaretPosition(selStart + indent.length());
+                    } else {
+                        javax.swing.text.Element root = doc.getDefaultRootElement();
+                        int startLine = root.getElementIndex(selStart);
+                        int endLine = root.getElementIndex(Math.max(selEnd - 1, 0));
+                        String indent = getIndentUnit();
+                        for (int ln = startLine; ln <= endLine; ln++) {
+                            int s = root.getElement(ln).getStartOffset();
+                            doc.insertString(s, indent, null);
+                        }
+                        // adjust selection to include inserted indents
+                        codeEditor.select(selStart, selEnd + (endLine - startLine + 1) * indent.length());
+                    }
+                } catch (BadLocationException ex) {
+                }
+                applySyntaxHighlighting();
+            }
+        });
+
+        // SHIFT+TAB: unindent selection or remove one indent unit before caret
+        codeEditor.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("shift TAB"), "editor-unindent");
+        codeEditor.getActionMap().put("editor-unindent", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                try {
+                    StyledDocument doc = codeEditor.getStyledDocument();
+                    int selStart = codeEditor.getSelectionStart();
+                    int selEnd = codeEditor.getSelectionEnd();
+                    javax.swing.text.Element root = doc.getDefaultRootElement();
+                    if (selStart == selEnd) {
+                        // remove indent unit before caret if present
+                        int line = root.getElementIndex(selStart);
+                        int lineStart = root.getElement(line).getStartOffset();
+                        int removeLen = Math.min(getIndentUnit().length(), selStart - lineStart);
+                        if (removeLen > 0) {
+                            String prefix = doc.getText(lineStart, removeLen);
+                            if (prefix.equals(getIndentUnit())) {
+                                doc.remove(lineStart, removeLen);
+                                codeEditor.setCaretPosition(selStart - removeLen);
+                            } else if (prefix.startsWith(" ")) {
+                                // remove as many leading spaces as available up to INDENT_UNIT
+                                int toRem = 0;
+                                for (int i = 0; i < removeLen; i++) {
+                                    if (prefix.charAt(i) == ' ')
+                                        toRem++;
+                                    else
+                                        break;
+                                }
+                                if (toRem > 0) {
+                                    doc.remove(lineStart, toRem);
+                                    codeEditor.setCaretPosition(selStart - toRem);
+                                }
+                            }
+                        }
+                    } else {
+                        int startLine = root.getElementIndex(selStart);
+                        int endLine = root.getElementIndex(Math.max(selEnd - 1, 0));
+                        int totalRemoved = 0;
+                        for (int ln = startLine; ln <= endLine; ln++) {
+                            int s = root.getElement(ln).getStartOffset();
+                            int removeLen = Math.min(getIndentUnit().length(), doc.getLength() - s);
+                            if (removeLen <= 0)
+                                continue;
+                            String prefix = doc.getText(s, removeLen);
+                            if (prefix.equals(getIndentUnit())) {
+                                doc.remove(s, removeLen);
+                                totalRemoved += removeLen;
+                            } else {
+                                // remove leading spaces up to INDENT_UNIT
+                                int toRem = 0;
+                                for (int i = 0; i < prefix.length(); i++) {
+                                    if (prefix.charAt(i) == ' ')
+                                        toRem++;
+                                    else
+                                        break;
+                                }
+                                if (toRem > 0) {
+                                    doc.remove(s, toRem);
+                                    totalRemoved += toRem;
+                                }
+                            }
+                        }
+                        // adjust selection
+                        codeEditor.select(selStart, Math.max(selEnd - totalRemoved, selStart));
+                    }
+                } catch (BadLocationException ex) {
+                }
+                applySyntaxHighlighting();
+            }
+        });
     }
 
     private void addTabToOutput(int metaIdx, JPanel panel) {
@@ -1975,13 +2180,13 @@ public class MainGUI2 extends JFrame {
         }));
 
         content.add(Box.createVerticalStrut(20));
-    JLabel fontTitle = new JLabel("Font Size (1 - 25)");
+        JLabel fontTitle = new JLabel("Font Size (1 - 25)");
         fontTitle.setFont(FONT_UI_B);
         fontTitle.setForeground(labelFg());
         content.add(fontTitle);
         content.add(Box.createVerticalStrut(10));
 
-    JSlider fontSlider = new JSlider(1, 25, currentFontSize);
+        JSlider fontSlider = new JSlider(1, 25, currentFontSize);
         fontSlider.setOpaque(false);
         fontSlider.setMajorTickSpacing(5);
         fontSlider.setMinorTickSpacing(1);
@@ -1993,6 +2198,41 @@ public class MainGUI2 extends JFrame {
             updateFontSize(newSize);
         });
         content.add(fontSlider);
+
+        content.add(Box.createVerticalStrut(20));
+        // Indentation settings
+        JLabel indentTitle = new JLabel("Indentation");
+        indentTitle.setFont(FONT_UI_B);
+        indentTitle.setForeground(labelFg());
+        content.add(indentTitle);
+        content.add(Box.createVerticalStrut(8));
+
+        String[] indentOptions = { "Tabs", "2 spaces", "4 spaces" };
+        JComboBox<String> indentBox = new JComboBox<>(indentOptions);
+        indentBox.setSelectedItem(indentWithTabs ? "Tabs" : (indentSize == 2 ? "2 spaces" : "4 spaces"));
+        indentBox.addActionListener(e -> {
+            String sel = (String) indentBox.getSelectedItem();
+            if (sel.contains("Tabs")) {
+                indentWithTabs = true;
+                indentSize = 1;
+            } else if (sel.contains("2")) {
+                indentWithTabs = false;
+                indentSize = 2;
+            } else {
+                indentWithTabs = false;
+                indentSize = 4;
+            }
+            // update LineNumberComponent if present
+            if (codeEditor != null && codeEditor.getParent() != null
+                    && codeEditor.getParent().getParent() instanceof JScrollPane) {
+                JScrollPane sp = (JScrollPane) codeEditor.getParent().getParent();
+                if (sp.getRowHeader() != null && sp.getRowHeader().getView() instanceof LineNumberComponent) {
+                    LineNumberComponent lnc = (LineNumberComponent) sp.getRowHeader().getView();
+                    lnc.setIndentConfig(indentSize, indentWithTabs);
+                }
+            }
+        });
+        content.add(indentBox);
 
         content.add(Box.createVerticalStrut(20));
         JLabel themeTitle = new JLabel("Color Theme");
@@ -2528,12 +2768,18 @@ public class MainGUI2 extends JFrame {
         private final JTextPane textPane;
         private final Color lnBg, lnFg, lnBorder;
         private static final int PAD = 10;
+        // Folding map: key = innerStart offset, value = original folded text
+        private final java.util.Map<Integer, String> folded = new java.util.HashMap<>();
+        private int indentSize = 4;
+        private boolean indentWithTabs = false;
 
-        LineNumberComponent(JTextPane tp, Color bg, Color fg, Color border) {
+        LineNumberComponent(JTextPane tp, Color bg, Color fg, Color border, int indentSize, boolean indentWithTabs) {
             this.textPane = tp;
             this.lnBg = bg;
             this.lnFg = fg;
             this.lnBorder = border;
+            this.indentSize = Math.max(1, indentSize);
+            this.indentWithTabs = indentWithTabs;
             setFont(tp.getFont());
             setBackground(bg);
             setForeground(fg);
@@ -2561,6 +2807,28 @@ public class MainGUI2 extends JFrame {
                     doc.addDocumentListener(dl);
                 repaint();
                 revalidate();
+            });
+
+            // Click to fold/unfold blocks
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    int y = e.getY();
+                    int lineH = textPane.getFontMetrics(textPane.getFont()).getHeight();
+                    int line = Math.max(0, y / lineH);
+                    try {
+                        javax.swing.text.Element root = textPane.getDocument().getDefaultRootElement();
+                        if (line >= root.getElementCount())
+                            return;
+                        int lineStart = root.getElement(line).getStartOffset();
+                        // Toggle fold at this line if block exists
+                        if (!tryUnfoldAt(lineStart)) {
+                            tryFoldAt(lineStart);
+                        }
+                        repaint();
+                    } catch (Exception ex) {
+                    }
+                }
             });
         }
 
@@ -2598,7 +2866,236 @@ public class MainGUI2 extends JFrame {
                 int y = i * lineH + fm.getAscent() + 5;
                 g2.setColor(lnFg);
                 g2.drawString(num, x, y);
+
+                // draw indent guides for this line (approximate positions for performance)
+                try {
+                    int lineStart = textPane.getDocument().getDefaultRootElement().getElement(i).getStartOffset();
+                    int lineEnd = textPane.getDocument().getDefaultRootElement().getElement(i).getEndOffset();
+                    String lineText = textPane.getDocument().getText(lineStart, Math.max(0, lineEnd - lineStart));
+                    int col = 0;
+                    for (int p = 0; p < lineText.length();) {
+                        char c = lineText.charAt(p);
+                        if (c == ' ') {
+                            col++;
+                            p++;
+                        } else if (c == '\t') {
+                            col += indentSize;
+                            p++;
+                        } else
+                            break;
+                    }
+                    int guides = col / Math.max(1, indentSize);
+                    int charW = fm.charWidth(' ');
+                    int leftInset = getInsets().left + 4;
+                    Rectangle vis = textPane.getVisibleRect();
+                    for (int gi = 0; gi < guides; gi++) {
+                        int gx = leftInset + gi * (indentSize * charW) - vis.x;
+                        int gy = i * lineH + 2;
+                        g2.setColor(new Color(0, 0, 0, 30));
+                        g2.drawLine(gx, gy, gx, gy + lineH - 4);
+                    }
+                } catch (BadLocationException ex) {
+                }
+
+                // draw fold indicator if this line starts a fold or is folded
+                try {
+                    int lineStart = textPane.getDocument().getDefaultRootElement().getElement(i).getStartOffset();
+                    boolean isFoldStart = isFoldableAt(lineStart);
+                    boolean isFolded = folded.containsKey(lineStart);
+                    if (isFoldStart || isFolded) {
+                        int bx = 8;
+                        int by = i * lineH + (lineH / 2) - 4;
+                        g2.setColor(isFolded ? lnFg : lnFg.darker());
+                        // draw simple +/- box
+                        g2.fillRect(bx, by, 8, 8);
+                        g2.setColor(lnBg);
+                        g2.drawLine(bx + 2, by + 4, bx + 6, by + 4); // minus
+                        if (!isFolded)
+                            g2.drawLine(bx + 4, by + 2, bx + 4, by + 6); // plus for foldable
+                    }
+                } catch (Exception ex) {
+                }
             }
+        }
+
+        private boolean isFoldableAt(int lineStart) {
+            try {
+                javax.swing.text.Document doc = textPane.getDocument();
+                int len = doc.getLength();
+                String text = doc.getText(0, len);
+                // find first brace after lineStart
+                for (int i = lineStart; i < len; i++) {
+                    char c = text.charAt(i);
+                    if (c == '{')
+                        return true;
+                    if (c == '\n' && i > lineStart)
+                        break; // only current line
+                }
+            } catch (BadLocationException ex) {
+            }
+            return false;
+        }
+
+        private boolean tryUnfoldAt(int lineStart) {
+            try {
+                javax.swing.text.Document doc = textPane.getDocument();
+                // if folded region starts at this offset, restore
+                if (folded.containsKey(lineStart)) {
+                    String original = folded.remove(lineStart);
+                    // find placeholder position: we assume placeholder replaced original at same
+                    // offset
+                    // search forward for closing brace after lineStart
+                    int len = doc.getLength();
+                    String text = doc.getText(0, len);
+                    int openPos = text.indexOf('{', lineStart);
+                    if (openPos >= 0) {
+                        int closePos = findMatchingBrace(text, openPos);
+                        if (closePos > openPos) {
+                            int innerStart = openPos + 1;
+                            int innerLen = closePos - innerStart;
+                            // replace placeholder with original
+                            doc.remove(innerStart, innerLen);
+                            doc.insertString(innerStart, original, null);
+                            return true;
+                        }
+                    }
+                }
+            } catch (BadLocationException ex) {
+            }
+            return false;
+        }
+
+        private void tryFoldAt(int lineStart) {
+            try {
+                javax.swing.text.Document doc = textPane.getDocument();
+                int len = doc.getLength();
+                String text = doc.getText(0, len);
+                // find '{' on this line
+                int openPos = -1;
+                int lineEnd = text.indexOf('\n', lineStart);
+                if (lineEnd < 0)
+                    lineEnd = len;
+                for (int i = lineStart; i < lineEnd; i++) {
+                    if (text.charAt(i) == '{') {
+                        openPos = i;
+                        break;
+                    }
+                }
+                if (openPos < 0)
+                    return;
+                int closePos = findMatchingBrace(text, openPos);
+                if (closePos <= openPos)
+                    return;
+                int innerStart = openPos + 1;
+                int innerLen = closePos - innerStart;
+                if (innerLen <= 0)
+                    return;
+                String original = text.substring(innerStart, innerStart + innerLen);
+                // store original and replace with small placeholder
+                folded.put(lineStart, original);
+                // compute folded line count for placeholder
+                int foldedLines = 0;
+                for (int k = 0; k < original.length(); k++)
+                    if (original.charAt(k) == '\n')
+                        foldedLines++;
+                String indent = indentWithTabs ? "\t" : " ".repeat(Math.max(0, indentSize));
+                String placeholder = "\n" + indent + "/*... " + foldedLines + " lines ...*/" + "\n";
+                doc.remove(innerStart, innerLen);
+                doc.insertString(innerStart, placeholder, null);
+            } catch (BadLocationException ex) {
+            }
+        }
+
+        // improved brace matcher that ignores braces inside strings and comments
+        private int findMatchingBrace(String text, int openPos) {
+            boolean inSingle = false, inDouble = false, inSL = false, inML = false;
+            boolean escaped = false;
+            int depth = 0;
+            for (int i = openPos; i < text.length(); i++) {
+                char c = text.charAt(i);
+                // handle end of single-line comment
+                if (inSL) {
+                    if (c == '\n')
+                        inSL = false;
+                    continue;
+                }
+                // handle end of multi-line comment
+                if (inML) {
+                    if (c == '*' && i + 1 < text.length() && text.charAt(i + 1) == '/') {
+                        inML = false;
+                        i++;
+                    }
+                    continue;
+                }
+                // handle string/char escapes
+                if (inDouble) {
+                    if (escaped) {
+                        escaped = false;
+                        continue;
+                    }
+                    if (c == '\\') {
+                        escaped = true;
+                        continue;
+                    }
+                    if (c == '"') {
+                        inDouble = false;
+                        continue;
+                    }
+                    continue;
+                }
+                if (inSingle) {
+                    if (escaped) {
+                        escaped = false;
+                        continue;
+                    }
+                    if (c == '\\') {
+                        escaped = true;
+                        continue;
+                    }
+                    if (c == '\'') {
+                        inSingle = false;
+                        continue;
+                    }
+                    continue;
+                }
+
+                // detect comment or string start
+                if (c == '/' && i + 1 < text.length() && text.charAt(i + 1) == '/') {
+                    inSL = true;
+                    i++;
+                    continue;
+                }
+                if (c == '/' && i + 1 < text.length() && text.charAt(i + 1) == '*') {
+                    inML = true;
+                    i++;
+                    continue;
+                }
+                if (c == '"') {
+                    inDouble = true;
+                    escaped = false;
+                    continue;
+                }
+                if (c == '\'') {
+                    inSingle = true;
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '{')
+                    depth++;
+                else if (c == '}') {
+                    depth--;
+                    if (depth == 0)
+                        return i;
+                }
+            }
+            return -1;
+        }
+
+        public void setIndentConfig(int size, boolean tabs) {
+            this.indentSize = Math.max(1, size);
+            this.indentWithTabs = tabs;
+            repaint();
         }
     }
 }
