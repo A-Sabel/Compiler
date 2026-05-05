@@ -1659,9 +1659,17 @@ public class BytecodeGenerator {
         }
 
         ASTNode receiver = getChildOfType(node, "RECEIVER");
+        if (receiver == null) {
+            for (ASTNode child : node.getChildren()) {
+                if (!"ARGS".equals(child.getType()) && !"METHOD_DECL".equals(child.getType())) {
+                    receiver = child;
+                    break;
+                }
+            }
+        }
         ASTNode args = getChildOfType(node, "ARGS");
         ASTNode methodDecl = getChildOfType(node, "METHOD_DECL");
-        boolean hasReceiver = receiver != null && !receiver.getChildren().isEmpty();
+        boolean hasReceiver = receiver != null && ("RECEIVER".equals(receiver.getType()) ? !receiver.getChildren().isEmpty() : true);
 
         boolean isStatic = false;
         String returnType = "void";
@@ -1680,7 +1688,11 @@ public class BytecodeGenerator {
 
         String objAddr = null;
         if (hasReceiver && !isStatic && receiver != null) {
-            objAddr = visit(receiver.getChildren().get(0));
+            ASTNode receiverExpr = receiver;
+            if ("RECEIVER".equals(receiver.getType()) && !receiver.getChildren().isEmpty()) {
+                receiverExpr = receiver.getChildren().get(0);
+            }
+            objAddr = visit(receiverExpr);
             stackTracker.push();
         } else if (!isStatic && !hasReceiver) {
             // Instance method called without explicit receiver: use implicit 'this'
@@ -1747,9 +1759,22 @@ public class BytecodeGenerator {
 
     private String handleFieldAccess(ASTNode node) {
         ASTNode receiver = getChildOfType(node, "RECEIVER");
+        if (receiver == null) {
+            for (ASTNode child : node.getChildren()) {
+                if (!"ARGS".equals(child.getType()) && !"METHOD_DECL".equals(child.getType())) {
+                    receiver = child;
+                    break;
+                }
+            }
+        }
         String objAddr = null;
-        if (receiver != null && !receiver.getChildren().isEmpty())
-            objAddr = visit(receiver.getChildren().get(0));
+        if (receiver != null) {
+            ASTNode receiverExpr = receiver;
+            if ("RECEIVER".equals(receiver.getType()) && !receiver.getChildren().isEmpty()) {
+                receiverExpr = receiver.getChildren().get(0);
+            }
+            objAddr = visit(receiverExpr);
+        }
         String result = newTemp();
         emit(Instruction.fieldLoad(result, objAddr != null ? objAddr : "this", node.getValue()));
         stackTracker.push();

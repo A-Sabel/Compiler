@@ -898,6 +898,45 @@ public class SemanticAnalyzer {
 
             case "METHOD_CALL": {
                 String methodName = value;
+
+                // Detect instance method calls on built-in String receiver types.
+                ASTNode receiverNode = null;
+                for (ASTNode child : expr.getChildren()) {
+                    if ("RECEIVER".equals(child.getType())) {
+                        receiverNode = child;
+                        break;
+                    }
+                }
+                if (receiverNode == null) {
+                    for (ASTNode child : expr.getChildren()) {
+                        if (!"ARGS".equals(child.getType()) && !"METHOD_DECL".equals(child.getType())) {
+                            receiverNode = child;
+                            break;
+                        }
+                    }
+                }
+                if (receiverNode != null) {
+                    ASTNode receiverExpr = receiverNode;
+                    if ("RECEIVER".equals(receiverNode.getType()) && !receiverNode.getChildren().isEmpty()) {
+                        receiverExpr = receiverNode.getChildren().get(0);
+                    }
+                    String receiverType = inferExpressionType(receiverExpr);
+                    if ("String".equals(receiverType) && "length".equals(methodName)) {
+                        ASTNode argsNode = null;
+                        for (ASTNode child : expr.getChildren()) {
+                            if ("ARGS".equals(child.getType())) {
+                                argsNode = child;
+                                break;
+                            }
+                        }
+                        int argCount = argsNode != null ? argsNode.getChildren().size() : 0;
+                        if (argCount == 0) {
+                            expr.setAttribute("resolved_return_type", "int");
+                            return "int";
+                        }
+                    }
+                }
+
                 List<SymbolTable.MethodSignature> possibleMethods = symbolTable.lookupMethods(methodName);
 
                 if (possibleMethods == null || possibleMethods.isEmpty()) {

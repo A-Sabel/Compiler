@@ -456,6 +456,15 @@ public class Interpreter {
             return (int) Math.pow(base.doubleValue(), exponent.doubleValue());
         }
 
+        if (isVirtual && receiver instanceof String) {
+            if ("length".equals(name)) {
+                return ((String) receiver).length();
+            }
+            if ("toString".equals(name)) {
+                return receiver.toString();
+            }
+        }
+
         MethodInfo method = lookupMethod(name, descriptor);
         if (method == null) {
             if (isVirtual && receiver != null && "toString".equals(name)) {
