@@ -9,6 +9,7 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.GradientPaint;
+import java.awt.Dialog;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
@@ -34,6 +35,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import javax.swing.BorderFactory;
+import javax.swing.BoxLayout;
 import javax.swing.Box;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
@@ -41,6 +43,8 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
+import javax.swing.JCheckBox;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -199,6 +203,16 @@ public class MainGUI2 extends JFrame {
     // ── State ─────────────────────────────────────────────────────────────────
     private JTextArea         codeEditor;
     private JTabbedPane       outputTabs;
+
+    // ── Visibility State & References ─────────────────────────────────────────
+    private boolean showConsoleTab = true, showErrorsTab = true, showWarningsTab = true;
+    private boolean showRuntimeTab = true, showSymbolTab = true, showGeneratedTab = true;
+    private JPanel runtimeTabPanel, astTreeTabPanel, symbolTableTabPanel, generatedCodeTabPanel;
+    private JPanel tabsLeft; // Container for bottom console labels
+    private final String[][] tabData = {
+        {"\u25B6", "Runtime Output"}, {"\uD83C\uDF32", "AST Tree"},
+        {"\u25A3", "Symbol Table"}, {"{ }", "Generated Code"}
+    };
 
     // FIX (appendConsole color): replaced JTextArea with JTextPane + StyledDocument
     // so each log line can carry its own foreground color.
@@ -365,8 +379,9 @@ public class MainGUI2 extends JFrame {
         right.add(div);
 
         themeToggleBtn = buildThemeToggleBtn();
-        right.add(themeToggleBtn);
-        right.add(buildIconHeaderBtn("\u2699", "Settings (Ctrl+,)"));
+        JButton settingsBtn = buildIconHeaderBtn("\u2699", "Settings (Ctrl+,)");
+        settingsBtn.addActionListener(e -> showSettingsDialog());
+        right.add(themeToggleBtn); right.add(settingsBtn);
 
         header.add(left,  BorderLayout.WEST);
         header.add(right, BorderLayout.EAST);
@@ -749,13 +764,6 @@ public class MainGUI2 extends JFrame {
         headerRight.add(copyOutBtn);
         outputHeader.add(headerRight, BorderLayout.EAST);
 
-        String[][] tabs = {
-            {"\u25B6", "Runtime Output"},
-            {"\uD83C\uDF32", "AST Tree"},
-            {"\u25A3", "Symbol Table"},
-            {"{ }", "Generated Code"}
-        };
-
         outputTabs = new JTabbedPane();
         outputTabs.setTabPlacement(JTabbedPane.TOP);
         outputTabs.setFont(FONT_UI_SM);
@@ -791,56 +799,50 @@ public class MainGUI2 extends JFrame {
             @Override protected void paintContentBorder(Graphics g, int tp, int idx) {}
         });
 
-        outputTabs.addTab(tabs[0][1], buildRuntimeOutputPanel());
-        outputTabs.addTab(tabs[1][1], buildAstTreePanel());
-        outputTabs.addTab(tabs[2][1], buildSymbolTablePanel());
-        outputTabs.addTab(tabs[3][1], buildGeneratedCodePanel());
+        runtimeTabPanel       = buildRuntimeOutputPanel();
+        astTreeTabPanel       = buildAstTreePanel();
+        symbolTableTabPanel   = buildSymbolTablePanel();
+        generatedCodeTabPanel = buildGeneratedCodePanel();
 
-        for (int i = 0; i < outputTabs.getTabCount(); i++) {
-            final int idx = i;
-            JPanel tabComp = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0)) {
-                @Override protected void paintComponent(Graphics g) {
-                    g.setColor(idx == outputTabs.getSelectedIndex() ? bg() : outTabBg());
-                    g.fillRect(0, 0, getWidth(), getHeight());
-                }
-            };
-            tabComp.setOpaque(false);
-            tabComp.setBorder(BorderFactory.createEmptyBorder(5, 8, 5, 10));
-
-            boolean sel = i == outputTabs.getSelectedIndex();
-            JLabel iconLbl = new JLabel(tabs[i][0]);
-            iconLbl.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 11));
-            iconLbl.setForeground(sel ? labelFg() : outTabFg());
-            JLabel nameLbl = new JLabel(tabs[i][1]);
-            nameLbl.setFont(FONT_UI_B);
-            nameLbl.setForeground(sel ? labelFg() : outTabFg());
-
-            tabComp.add(iconLbl); tabComp.add(nameLbl);
-            outputTabs.setTabComponentAt(i, tabComp);
-        }
-
-        outputTabs.addChangeListener(e -> {
-            for (int i = 0; i < outputTabs.getTabCount(); i++) {
-                Component tc = outputTabs.getTabComponentAt(i);
-                if (tc instanceof JPanel panel) {
-                    boolean sel = i == outputTabs.getSelectedIndex();
-                    Color fg = sel ? labelFg() : MUTED_FG;
-                    for (Component c : panel.getComponents()) {
-                        if (c instanceof JLabel lbl) {
-                            lbl.setForeground(fg);
-                            lbl.setFont(FONT_UI_B);
-                        }
-                    }
-                    panel.repaint();
-                }
-            }
-            outputTabs.repaint();
-        });
+        updateOutputTabs();
 
         p.add(outputHeader, BorderLayout.NORTH);
         p.add(outputTabs,   BorderLayout.CENTER);
         return p;
     }
+
+    private void updateOutputTabs() {
+        outputTabs.removeAll();
+        if (showRuntimeTab)   addTabToOutput(0, runtimeTabPanel);
+        addTabToOutput(1, astTreeTabPanel); // AST remains as core anchor
+        if (showSymbolTab)    addTabToOutput(2, symbolTableTabPanel);
+        if (showGeneratedTab) addTabToOutput(3, generatedCodeTabPanel);
+    }
+
+    private void addTabToOutput(int metaIdx, JPanel panel) {
+        outputTabs.addTab(tabData[metaIdx][1], panel);
+        int i = outputTabs.indexOfComponent(panel);
+
+        JPanel tabComp = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0)) {
+            @Override protected void paintComponent(Graphics g) {
+                g.setColor(outputTabs.getSelectedComponent() == panel ? bg() : outTabBg());
+                g.fillRect(0, 0, getWidth(), getHeight());
+            }
+        };
+        tabComp.setOpaque(false);
+        tabComp.setBorder(BorderFactory.createEmptyBorder(5, 8, 5, 10));
+
+        JLabel iconLbl = new JLabel(tabData[metaIdx][0]);
+        iconLbl.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 11));
+        iconLbl.setForeground(MUTED_FG);
+        JLabel nameLbl = new JLabel(tabData[metaIdx][1]);
+        nameLbl.setFont(FONT_UI_B);
+        nameLbl.setForeground(MUTED_FG);
+
+        tabComp.add(iconLbl); tabComp.add(nameLbl);
+        outputTabs.setTabComponentAt(i, tabComp);
+    }
+
 
     // ── Symbol Table ──────────────────────────────────────────────────────────
     private JPanel buildSymbolTablePanel() {
@@ -1216,7 +1218,7 @@ public class MainGUI2 extends JFrame {
         strip.setPreferredSize(new Dimension(0, 35));
         strip.setOpaque(false);
 
-        JPanel tabsLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        tabsLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         tabsLeft.setOpaque(false);
 
         consoleTabBtn   = buildConsoleTabLbl(">_  Console",        "Console");
@@ -1499,6 +1501,68 @@ public class MainGUI2 extends JFrame {
     private void logAction(String msg, Color color) {
         String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
         appendConsole("[" + now + "] " + msg, color);
+    }
+
+    private void showSettingsDialog() {
+        JDialog dialog = new JDialog(this, "Settings", true);
+        dialog.setLayout(new BorderLayout());
+        dialog.setBackground(bg());
+
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        content.setBackground(bg());
+
+        JLabel title = new JLabel("Hide/Unhide Tabs");
+        title.setFont(FONT_UI_B); title.setForeground(labelFg());
+        content.add(title); content.add(Box.createVerticalStrut(15));
+
+        content.add(createSettingsCheckbox("Console", showConsoleTab, e -> {
+            showConsoleTab = ((JCheckBox)e.getSource()).isSelected();
+            consoleTabBtn.setVisible(showConsoleTab); tabsLeft.revalidate();
+        }));
+        content.add(createSettingsCheckbox("Errors", showErrorsTab, e -> {
+            showErrorsTab = ((JCheckBox)e.getSource()).isSelected();
+            errorCountLabel.setVisible(showErrorsTab); tabsLeft.revalidate();
+        }));
+        content.add(createSettingsCheckbox("Warnings", showWarningsTab, e -> {
+            showWarningsTab = ((JCheckBox)e.getSource()).isSelected();
+            warnCountLabel.setVisible(showWarningsTab); tabsLeft.revalidate();
+        }));
+        content.add(createSettingsCheckbox("Runtime Output", showRuntimeTab, e -> {
+            showRuntimeTab = ((JCheckBox)e.getSource()).isSelected(); updateOutputTabs();
+        }));
+        content.add(createSettingsCheckbox("Symbol Table", showSymbolTab, e -> {
+            showSymbolTab = ((JCheckBox)e.getSource()).isSelected(); updateOutputTabs();
+        }));
+        content.add(createSettingsCheckbox("Generated Code", showGeneratedTab, e -> {
+            showGeneratedTab = ((JCheckBox)e.getSource()).isSelected(); updateOutputTabs();
+        }));
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        actions.setBackground(bgLight());
+        JButton applyBtn = new JButton("Apply");
+        applyBtn.addActionListener(e -> dialog.dispose());
+        JButton closeBtn = new JButton("Close");
+        closeBtn.addActionListener(e -> dialog.dispose());
+        actions.add(applyBtn); actions.add(closeBtn);
+
+        dialog.add(content, BorderLayout.CENTER);
+        dialog.add(actions, BorderLayout.SOUTH);
+        dialog.pack();
+        dialog.setSize(300, 400);
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    private JCheckBox createSettingsCheckbox(String text, boolean selected, java.awt.event.ActionListener al) {
+        JCheckBox cb = new JCheckBox(text, selected);
+        cb.setFont(FONT_UI);
+        cb.setForeground(labelFg());
+        cb.setOpaque(false);
+        cb.setFocusPainted(false);
+        cb.addActionListener(al);
+        return cb;
     }
 
     private void resetAstTree(String message) {
