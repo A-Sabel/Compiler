@@ -57,9 +57,13 @@
 
 ### 6. User Interface (UI)
 
-- `MainGUI` - main application window and interface
-- `CodeArea` - code editor component
+- `MainGUI` & `MainGUI2` - main application windows and interfaces
+- Modern VSCode-inspired Dark/Light theme toggle
+- Interactive Abstract Syntax Tree (AST) visualization with syntax coloring
+- Styled console with per-line color-coded logging (errors, warnings, info)
+- `CodeArea` - code editor component with line number gutters
 - `ResultTable` - results and token display table
+- Integrated tabs for Runtime Output, Symbol Table, and Generated Code
 
 ### 7. Virtual Machine (Interpreter)
 
@@ -68,18 +72,14 @@
 - Supports core TAC instructions: arithmetic, variable storage, control flow (jumps), and I/O (`print`).
 - Captures and displays runtime output and errors in a dedicated tab.
 
-### 7. Build & Project Configuration
+### 8. Build & Project Configuration
 
 - Maven-based project structure (`pom.xml`)
 - Organized package hierarchy
 - Test framework setup (`AppTest.java`)
 - Compiled classes in `target/` directory
 
----
-
-## ⚠️ In Progress / Partially Complete
-
-### 1. Semantic Analysis (`sematics/` folder)
+### 9. Semantic Analysis (`semantics/` folder)
 
 - ✅ **Core Validation:** Full support for type checking, variable declaration, assignment validation, scope management, and control flow validation.
 - ✅ **Expression Type Inference:**
@@ -90,18 +90,52 @@
   - Loop depth tracking for `break`/`continue` validation
   - Return type checking
   - Boolean condition validation for control structures
-- ✅ **Smart Error Suppression:** Sentinel Type Strategy
-  - Uses `"type_error"` sentinel to prevent duplicate error reporting
-  - Eliminates "Double Jeopardy" (reporting the same error twice)
-  - Root cause errors reported at source, secondary errors suppressed
-- ⚠️ **Not Yet Implemented:**
-  - Generic types
-  - Lambda expressions
-  - Exception type checking
+- ✅ **Advanced Analysis:**
+  - **Unused Variable Detection:** Tracks declarations and usage to warn about dead variables.
+  - **For-Each Loop Analysis:** Validates iterable collections and iterator types.
+  - **Dead Code Detection:** Warns on unreachable code after `return`/`break`/`continue`.
+- ✅ **Smart Error Suppression:** Sentinel Type Strategy (prevents "Double Jeopardy").
+
+### 10. Code Generation (`codegen/` folder)
+
+- ✅ **JVM-like Bytecode with TAC-style Representation:**
+  - The `BytecodeGenerator` performs a depth-first traversal of the AST to generate a list of `Instruction` objects.
+- ✅ **Comprehensive Feature Support:**
+  - **Expressions & Variables:** Full arithmetic, logical short-circuiting, simple and compound assignments.
+  - **Control Flow:** Translates `if`, `while`, `do-while`, `for`, `switch`, `break`, `continue` using labels and jumps.
+  - **Methods:** Parameter declarations, `call`, `callvirtual`, and implicit `<init>`/`<clinit>`.
+  - **Objects & Arrays:** `new`, `new_array`, field access (`field_load`, `field_store`), and array access.
+- ✅ **Professional-Grade Features:**
+  - **Constant Pool:** Manages and interns strings and constants.
+  - **Type-Specific Opcodes:** Selects correct opcodes based on type (e.g., `IADD`, `DADD`).
+  - **Metadata Generation:** Produces stack map frames, exception tables (`try-catch`), and local variable tables for verification.
+
+### 11. Optimization
+
+- ✅ **Constant Folding:** Expressions involving only literals are evaluated at compile time.
+- ✅ **Strength Reduction:** Expensive operations are replaced with cheaper ones (e.g., `x * 2` becomes `x << 1`).
+- ✅ **Common Subexpression Elimination (CSE):** Pure expression results are cached and reused within the same scope.
+- ✅ **Dead Code Elimination (DCE):** Detects and discards unreachable instructions.
+- ✅ **Peephole Optimization:** Scans for and removes inefficient instruction patterns (e.g., redundant `COPY`).
 
 ---
 
-## 🎯 Recent Improvements (April 30, 2026)
+## ⚠️ Out of Scope / Future Work
+
+- Generic types
+- Lambda expressions
+- Exception type checking
+
+---
+
+## 🎯 Recent Improvements (May 5, 2026)
+
+### Compiler UX & Interface
+
+- Integrated `MainGUI2` with a modern, VSCode-inspired Dark/Light theme toggle.
+- Added an interactive Abstract Syntax Tree (AST) explorer with type-based syntax coloring.
+- Enhanced console with rich text (color-coded errors, warnings, and success logs) and independent tracking tabs.
+- Included line number gutters and robust editor functionality (copy, paste, export, clear).
 
 ### Parser Enhancements
 
@@ -113,58 +147,21 @@
 
 ### Semantic Analysis Improvements
 
-- Implemented **Sentinel Type Strategy** for clean error reporting
-  - Returns `"type_error"` sentinel when expression validation fails
-  - Prevents duplicate error cascades ("Double Jeopardy")
-  - Only root cause errors are reported to the user
-- Enhanced ternary expression type checking
-  - Detects incompatible branch types
-  - Reports error at ternary site, not at initialization
-- Full variable scope tracking with symbol table integration
-- Comprehensive loop control validation (`break`/`continue`)
+- Implemented **Sentinel Type Strategy** for clean error reporting (prevents "Double Jeopardy").
+- Added **Unused Variable Detection** to warn developers of dead declarations.
+- Implemented **Method Overload Resolution** to accurately resolve function calls by arity and parameter types.
+- Added comprehensive validation for **For-Each Loops** and array bounding.
+- Enhanced ternary expression type checking and full variable scope tracking.
+- Refined Dead Code detection post-terminal statements (`return`, `break`, `continue`).
 
-### Compiler UX
+### Code Generation & Optimization
 
-- ✨ **Smart:** Detects and suggests type name typos
-- ✨ **Clean:** Eliminates redundant error reporting
-- ✨ **Professional:** Reports only the root cause, not cascading secondary errors
-
----
-
-### ⚠️ In Progress / Partially Complete
-
-### 3. Code Generation (codegen/ folder)
-
-- ✅ **JVM-like Bytecode with TAC-style Representation:**
-  - The `BytecodeGenerator` performs a depth-first traversal of the AST to generate a list of `Instruction` objects.
-  - While represented internally as Three-Address Code (e.g., `t1 = a + b`), the generated opcodes and metadata are designed for a professional, JVM-like target.
-- ✅ **Comprehensive Feature Support:**
-  - **Expressions:** Full support for arithmetic, unary, comparison, and logical operators (with short-circuiting).
-  - **Variables:** Correctly handles declarations, reads, and assignments (simple and compound).
-  - **Control Flow:** Translates all structures (`if`, `while`, `do-while`, `for`, `switch`, `break`, `continue`) using labels and jump instructions. Loop contexts are correctly nested and tracked.
-  - **Methods:** Generates method start/end markers, parameter declarations, and call instructions (`call`, `callvirtual`).
-  - **Objects & Arrays:** Supports object creation (`new`), field access (`field_load`, `field_store`), and array operations (`new_array`, `array_load`, `array_store`).
-- ✅ **Control Flow Generation:**
-  - if-else statements use `ifFalse <cond> goto ELSE_n` and labeled blocks
-  - while loops use start/end labels with conditional jump
-- ✅ **Professional-Grade Features:**
-  - **Constant Pool:** Manages and interns strings and other constants.
-  - **Type-Specific Opcodes:** Selects correct opcodes based on type (e.g., `IADD`, `DADD`).
-  - **Metadata Generation:** Produces stack map frames, exception tables, line number tables, and local variable tables for verification and debugging.
-  - **Implicit Generation:** Synthesizes default constructors (`<init>`) and static initializers (`<clinit>`) as needed.
-
-### 4. Optimization
-
-Optimizations are performed during code generation and in a final peephole pass.
-
-- ✅ **Constant Folding:** Expressions involving only literals (e.g., `2 + 3`) are evaluated at compile time.
-- ✅ **Strength Reduction:** Expensive operations are replaced with cheaper ones (e.g., `x * 2` becomes a bitwise shift `x << 1`).
-- ✅ **Common Subexpression Elimination:** The results of pure expressions are cached and reused within the same scope to avoid redundant computation.
-- ✅ **Dead Code Elimination:** The generator detects and discards instructions that are unreachable (e.g., code after a `return`).
-- ✅ **Peephole Optimization:** A final pass scans the instruction list for inefficient patterns, such as redundant `COPY` instructions.
+- Finalized the `BytecodeGenerator` to output professional JVM-style bytecode.
+- Added Stack Map Frames and Exception Table generation for robust runtime verification.
+- Activated a full optimization pipeline: Constant Folding, Strength Reduction, CSE, DCE, and Peephole optimizations.
 
 ---
 
 ## Last Updated
 
-May 4, 2026
+May 5, 2026
