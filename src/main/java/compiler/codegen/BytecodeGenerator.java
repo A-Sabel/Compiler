@@ -180,7 +180,10 @@ public class BytecodeGenerator {
         boolean isFloat  = jvmType.equals("F");
         boolean isDouble = jvmType.equals("D");
         switch (op) {
-            case "+": return isLong ? Opcode.LADD : isFloat ? Opcode.FADD : isDouble ? Opcode.DADD : Opcode.IADD;
+            case "+": 
+                if (jvmType.equals("Ljava/lang/String;")) return Opcode.ADD;
+                return isLong ? Opcode.LADD : isFloat ? Opcode.FADD : isDouble ? Opcode.DADD : Opcode.IADD;
+
             case "-": return isLong ? Opcode.LSUB : isFloat ? Opcode.FSUB : isDouble ? Opcode.DSUB : Opcode.ISUB;
             case "*": return isLong ? Opcode.LMUL : isFloat ? Opcode.FMUL : isDouble ? Opcode.DMUL : Opcode.IMUL;
             case "/": return isLong ? Opcode.LDIV : isFloat ? Opcode.FDIV : isDouble ? Opcode.DDIV : Opcode.IDIV;
@@ -225,6 +228,14 @@ public class BytecodeGenerator {
             case "NUMBER":
             case "LITERAL":    return inferLiteralType(node.getValue());
             case "IDENTIFIER": return slotAllocator.typeOf(node.getValue());
+            case "BINARY_OP": {
+                if ("+".equals(node.getValue())) {
+                    if (inferNodeJvmType(node.getChildren().get(0)).equals("Ljava/lang/String;") ||
+                        inferNodeJvmType(node.getChildren().get(1)).equals("Ljava/lang/String;")) {
+                        return "Ljava/lang/String;";
+                    }
+                }
+            }
             default:           return "I";
         }
     }
@@ -268,9 +279,13 @@ public class BytecodeGenerator {
             emit(Instruction.constPush(result, "0", "ICONST_0"));
             stackTracker.push(); return;
         }
-        if (literal.startsWith("\"") || jvmType.startsWith("L")) {
-            int idx = constantPool.internString(literal);
-            emit(Instruction.internString(idx, literal));
+        if (literal.startsWith("\"") || jvmType.equals("Ljava/lang/String;")) {
+            String cleanValue = literal;
+            if (literal.startsWith("\"") && literal.endsWith("\"") && literal.length() >= 2) {
+                cleanValue = literal.substring(1, literal.length() - 1);
+            }
+            int idx = constantPool.internString(cleanValue);
+            emit(Instruction.internString(idx, cleanValue));
             emit(Instruction.ldc(result, idx));
             stackTracker.push(); return;
         }
@@ -895,17 +910,28 @@ public class BytecodeGenerator {
     }
 
     private void handlePrint(ASTNode node) {
-        int argCount = 0;
-        for (ASTNode child : node.getChildren()) {
-            String val = visit(child);
-            if (val != null) {
-                emit(Instruction.arg(val));
-                stackTracker.push();
-                argCount++;
-            }
+        List<String> printArgs = new ArrayList<>();
+        // Flatten any string concatenation in the print arguments
+        if (!node.getChildren().isEmpty()) {
+            flattenPrintArgs(node.getChildren().get(0), printArgs);
         }
-        emit(Instruction.print(argCount));
-        stackTracker.pop(argCount);
+        
+        for (String arg : printArgs) {
+            emit(Instruction.arg(arg));
+            stackTracker.push();
+        }
+        emit(Instruction.print(printArgs.size()));
+        stackTracker.pop(printArgs.size());
+    }
+
+    private void flattenPrintArgs(ASTNode node, List<String> args) {
+        if ("BINARY_OP".equals(node.getType()) && "+".equals(node.getValue()) &&
+            "Ljava/lang/String;".equals(inferNodeJvmType(node))) {
+            flattenPrintArgs(node.getChildren().get(0), args);
+            flattenPrintArgs(node.getChildren().get(1), args);
+        } else {
+            args.add(visit(node));
+        }
     }
 
     private String handleAssign(ASTNode node) {
@@ -1016,6 +1042,22 @@ public class BytecodeGenerator {
         String left   = visit(leftNode);
         String right  = visit(rightNode);
         String result = newTemp();
+        
+        // Fix: Determine the dominant type for the operation including Strings, Longs, and Floats
+        String leftJvmType = inferNodeJvmType(leftNode);
+        String rightJvmType = inferNodeJvmType(rightNode);
+        String dominantType = "I";
+
+        if (leftJvmType.equals("Ljava/lang/String;") || rightJvmType.equals("Ljava/lang/String;")) {
+            dominantType = "Ljava/lang/String;";
+        } else if (leftJvmType.equals("D") || rightJvmType.equals("D")) {
+            dominantType = "D";
+        } else if (leftJvmType.equals("J") || rightJvmType.equals("J")) {
+            dominantType = "J";
+        } else if (leftJvmType.equals("F") || rightJvmType.equals("F")) {
+            dominantType = "F";
+        }
+
         String folded = tryConstantFold(result, left, opStr, right);
         if (folded != null) {
             // If this has a CSE key, cache the result
@@ -1034,7 +1076,7 @@ public class BytecodeGenerator {
             }
             return reduced;
         }
-        Opcode opc = resolveTypedBinaryOpcode(opStr, "I");
+        Opcode opc = resolveTypedBinaryOpcode(opStr, dominantType);
         emit(Instruction.binary(opc, result, left, opStr, right));
         stackTracker.pop(2); stackTracker.push();
         
