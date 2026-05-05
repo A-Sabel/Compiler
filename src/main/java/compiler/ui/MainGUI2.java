@@ -173,12 +173,7 @@ public class MainGUI2 extends JFrame {
             codeEditor.setText(savedCode);
         } else if (codeEditor != null) {
             codeEditor.setText(
-                "void main() {\n" +
-                "    int a = 10;\n" +
-                "    int b = 20;\n" +
-                "    int result = a + b;\n" +
-                "    System.out.println(\"The sum is: \" + result);\n" +
-                "}"
+                "//input code here\n"
             );
         }
 
@@ -957,8 +952,8 @@ public class MainGUI2 extends JFrame {
         consoleArea.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
 
         String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-        appendConsole("\u2713 [" + now + "] Lexical analysis completed successfully", SUCCESS_GREEN);
-        appendConsole("\u2713 [" + now + "] Generated 42 tokens from source code",    SUCCESS_GREEN);
+        appendConsole("\u2713 [" + now + "] Welcome to console! Compiler logs appear here.", SUCCESS_GREEN);
+
 
         // Setup CardLayout for bottom panel
         consoleLayout = new CardLayout();
