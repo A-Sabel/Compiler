@@ -1,6 +1,0 @@
-class Test {
-    void main() {
-        int i = 5;
-        println(i);
-    }
-}

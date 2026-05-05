@@ -153,7 +153,7 @@ public class Interpreter {
 
                     case NEW_ARRAY: {
                         String elementType = instr.getArg1();
-                        Object sizeObj = resolveValue(instr.getOp(), context);
+                        Object sizeObj = resolveValue(instr.getArg2(), context);
                         int size = toNumber(sizeObj).intValue();
                         List<Object> array = new ArrayList<>();
                         for (int i = 0; i < size; i++) {

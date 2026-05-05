@@ -1,8 +1,0 @@
-class Test {
-    void main() {
-        int i = 1;
-        println(i);
-        i++;
-        println(i);
-    }
-}
