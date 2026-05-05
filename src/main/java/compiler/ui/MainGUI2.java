@@ -1493,6 +1493,21 @@ public class MainGUI2 extends JFrame {
         };
     }
 
+    /**
+     * Converts the properly-parsed ASTNode tree to a Swing DefaultMutableTreeNode.
+     * This uses the actual parser output, not a token reconstruction.
+     */
+    private DefaultMutableTreeNode buildAstFromParsedAst(compiler.parser.ast.ASTNode astNode) {
+        if (astNode == null) {
+            return new DefaultMutableTreeNode("<null AST>");
+        }
+        DefaultMutableTreeNode swingNode = new DefaultMutableTreeNode(astNode.toDisplayString());
+        for (compiler.parser.ast.ASTNode child : astNode.getChildren()) {
+            swingNode.add(buildAstFromParsedAst(child));
+        }
+        return swingNode;
+    }
+
     // =========================================================================
     // CONSOLE
     // FIX (appendConsole color): console is now a JTextPane with StyledDocument
@@ -2126,7 +2141,7 @@ public class MainGUI2 extends JFrame {
                     runtimeOutput = buffer.toString();
 
                     // Build AST off-EDT (DefaultMutableTreeNode is not a Swing component)
-                    final DefaultMutableTreeNode astRoot = buildAstFromTokens(compileResult.tokens);
+                    final DefaultMutableTreeNode astRoot = buildAstFromParsedAst(compileResult.parsedAst);
 
                     final String finalOutput = runtimeOutput;
                     final long finalMs = durationMs;

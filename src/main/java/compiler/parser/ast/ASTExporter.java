@@ -23,24 +23,26 @@ import java.util.List;
  * Usage:
  *   ASTExporter.export(rootNode, "ast_output.txt");
  */
+
 public class ASTExporter {
 
-    private ASTExporter() {} // utility class — no instances
+    private ASTExporter() {}
 
-    /**
-     * Exports the AST rooted at {@code root} to the given file path.
-     *
-     * @param root     the PROGRAM node returned by Parser.parse()
-     * @param filePath destination file (e.g. "ast_output.txt")
-     * @throws IOException if the file cannot be written
-     */
     public static void export(ASTNode root, String filePath) throws IOException {
         try (PrintWriter writer = new PrintWriter(new FileWriter(filePath))) {
             writer.println("═══════════════════════════════════════════════════");
             writer.println("  Abstract Syntax Tree (AST) — Group 3 Compiler");
             writer.println("═══════════════════════════════════════════════════");
             writer.println();
-            printNode(writer, root, "", true);
+
+            // FIX: print root label directly without a connector,
+            // then recurse into children with an empty base prefix.
+            writer.println(root.toDisplayString());
+            List<ASTNode> topChildren = root.getChildren();
+            for (int i = 0; i < topChildren.size(); i++) {
+                printNode(writer, topChildren.get(i), "", i == topChildren.size() - 1);
+            }
+
             writer.println();
             writer.println("═══════════════════════════════════════════════════");
             writer.println("  End of AST");
@@ -48,13 +50,13 @@ public class ASTExporter {
         }
     }
 
-    // ── Recursive tree printer ─────────────────────────────────────────────────
-
     private static void printNode(PrintWriter writer, ASTNode node,
-                                  String prefix, boolean isLast) {
-        String connector = isLast ? "└── " : "├── ";
+                                String prefix, boolean isLast) {
+        String connector   = isLast ? "└── " : "├── ";
         writer.println(prefix + connector + node.toDisplayString());
 
+        // FIX: isLast=true  → no more siblings, so children use blank padding "    "
+        //      isLast=false → siblings follow below, so children use pipe    "│   "
         String childPrefix = prefix + (isLast ? "    " : "│   ");
         List<ASTNode> children = node.getChildren();
         for (int i = 0; i < children.size(); i++) {
