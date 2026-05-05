@@ -51,6 +51,7 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.JSlider;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
@@ -177,15 +178,40 @@ public class MainGUI2 extends JFrame {
 
     // ── Dynamic color accessors ───────────────────────────────────────────────
     private Color bg() {
-        return isDarkMode ? D_BG_WHITE : L_BG_WHITE;
+        if (!isDarkMode) {
+            return switch (currentTheme) {
+                case PINK -> new Color(0xFFF5F8);
+                case VIOLET -> new Color(0xF8F5FF);
+                case RED -> new Color(0xFFF5F5);
+                default -> L_BG_WHITE;
+            };
+        }
+        return switch (currentTheme) {
+            case PINK -> new Color(0x241B1E);
+            case VIOLET -> new Color(0x1E1B24);
+            case RED -> new Color(0x241B1B);
+            default -> D_BG_WHITE;
+        };
     }
 
     private Color bgLight() {
-        return isDarkMode ? D_BG_LIGHT : L_BG_LIGHT;
+        Color b = bg();
+        int offset = isDarkMode ? 7 : -6;
+        return new Color(
+            Math.max(0, Math.min(255, b.getRed() + offset)),
+            Math.max(0, Math.min(255, b.getGreen() + offset)),
+            Math.max(0, Math.min(255, b.getBlue() + offset))
+        );
     }
 
     private Color bgPanel() {
-        return isDarkMode ? D_BG_PANEL : L_BG_PANEL;
+        Color b = bgLight();
+        int offset = isDarkMode ? 7 : -6;
+        return new Color(
+            Math.max(0, Math.min(255, b.getRed() + offset)),
+            Math.max(0, Math.min(255, b.getGreen() + offset)),
+            Math.max(0, Math.min(255, b.getBlue() + offset))
+        );
     }
 
     private Color headerBg() {
@@ -241,7 +267,7 @@ public class MainGUI2 extends JFrame {
     }
 
     private Color statusBg() {
-        return isDarkMode ? D_STATUS_BG : L_STATUS_BG;
+        return themeColor();
     }
 
     private Color hoverBg() {
@@ -249,7 +275,33 @@ public class MainGUI2 extends JFrame {
     }
 
     private Color selectionBg() {
-        return isDarkMode ? SELECTION_BG_DARK : LIST_SEL_LIGHT;
+        if (isDarkMode) {
+            return switch (currentTheme) {
+                case PINK -> new Color(0x4D1026);
+                case VIOLET -> new Color(0x2D1B4D);
+                case RED -> new Color(0x4D1010);
+                default -> SELECTION_BG_DARK;
+            };
+        }
+        return LIST_SEL_LIGHT;
+    }
+
+    private Color themeColor() {
+        return switch (currentTheme) {
+            case PINK -> new Color(0xD81B60);
+            case VIOLET -> new Color(0x5E35B1);
+            case RED -> new Color(0xD32F2F);
+            default -> VSCODE_BLUE;
+        };
+    }
+
+    private Color themeColorHover() {
+        return switch (currentTheme) {
+            case PINK -> new Color(0xF06292);
+            case VIOLET -> new Color(0x7E57C2);
+            case RED -> new Color(0xEF5350);
+            default -> VSCODE_BLUE_HVR;
+        };
     }
 
     // ── Fonts ─────────────────────────────────────────────────────────────────
@@ -303,6 +355,9 @@ public class MainGUI2 extends JFrame {
     private JLabel warnCountLabel;
     private int errorCount = 0;
     private int warnCount = 0;
+    private int currentFontSize = 13;
+    private enum Theme { BLUE, PINK, VIOLET, RED }
+    private Theme currentTheme = Theme.BLUE;
     private String activeConsoleTab = "Console";
 
     private JLabel consoleTabBtn;
@@ -395,7 +450,8 @@ public class MainGUI2 extends JFrame {
             protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g;
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                GradientPaint gp = new GradientPaint(0, 0, LOGO_BLUE_START, getWidth(), getHeight(), LOGO_BLUE_END);
+                GradientPaint gp = new GradientPaint(0, 0, themeColor(), getWidth(), getHeight(), 
+                        isDarkMode ? themeColor().darker() : themeColor().brighter());
                 g2.setPaint(gp);
                 g2.fillRoundRect(0, 0, getWidth(), getHeight(), 6, 6);
                 g2.setColor(Color.WHITE);
@@ -482,9 +538,9 @@ public class MainGUI2 extends JFrame {
                 Color base, fg, borderC;
                 if (primary) {
                     base = getModel().isPressed() ? PRESSED_BG_DARK
-                            : getModel().isRollover() ? VSCODE_BLUE_HVR : VSCODE_BLUE;
+                            : getModel().isRollover() ? themeColorHover() : themeColor();
                     fg = Color.WHITE;
-                    borderC = getModel().isRollover() ? VSCODE_BLUE_HVR : LOGO_BLUE_END;
+                    borderC = getModel().isRollover() ? themeColorHover() : themeColor().darker();
                 } else {
                     base = getModel().isPressed() ? hoverBg()
                             : getModel().isRollover() ? hoverBg() : new Color(0x00000000, true);
@@ -684,7 +740,7 @@ public class MainGUI2 extends JFrame {
                 Graphics2D g2 = (Graphics2D) g;
                 g2.setColor(bg());
                 g2.fillRect(0, 0, getWidth(), getHeight());
-                g2.setColor(VSCODE_BLUE);
+                g2.setColor(themeColor());
                 g2.fillRect(0, 0, getWidth(), 2);
             }
         };
@@ -804,6 +860,7 @@ public class MainGUI2 extends JFrame {
                 SimpleAttributeSet defaultAttr = new SimpleAttributeSet();
                 StyleConstants.setForeground(defaultAttr, isDarkMode ? D_ACCENT_BLACK : Color.BLACK);
                 StyleConstants.setFontFamily(defaultAttr, FONT_MONO.getFamily());
+                StyleConstants.setFontSize(defaultAttr, currentFontSize);
                 doc.setCharacterAttributes(0, text.length(), defaultAttr, true);
 
                 // 2. Methods (Matched before keywords to avoid overlapping) -> Gold
@@ -971,7 +1028,7 @@ public class MainGUI2 extends JFrame {
             protected void paintTabBorder(Graphics g, int tp,
                     int idx, int x, int y, int w, int h, boolean sel) {
                 if (sel) {
-                    g.setColor(VSCODE_BLUE);
+                    g.setColor(themeColor());
                     g.fillRect(x, y, w, 2);
                 }
                 g.setColor(border());
@@ -1586,7 +1643,7 @@ public class MainGUI2 extends JFrame {
                 if (isActive) {
                     g2.setColor(consoleBg());
                     g2.fillRect(0, 0, getWidth(), getHeight());
-                    g2.setColor(VSCODE_BLUE);
+                    g2.setColor(themeColor());
                     g2.fillRect(0, 0, getWidth(), 2);
                 }
                 setForeground(isActive ? labelFg() : MUTED_FG);
@@ -1643,7 +1700,7 @@ public class MainGUI2 extends JFrame {
             SimpleAttributeSet attrs = new SimpleAttributeSet();
             StyleConstants.setForeground(attrs, color);
             StyleConstants.setFontFamily(attrs, "Consolas");
-            StyleConstants.setFontSize(attrs, 11);
+            StyleConstants.setFontSize(attrs, Math.max(currentFontSize - 2, 1));
             consoleDoc.insertString(consoleDoc.getLength(), text + "\n", attrs);
             // Auto-scroll to bottom
             consolePane.setCaretPosition(consoleDoc.getLength());
@@ -1840,6 +1897,46 @@ public class MainGUI2 extends JFrame {
             updateOutputTabs();
         }));
 
+        content.add(Box.createVerticalStrut(20));
+        JLabel fontTitle = new JLabel("Font Size (0 - 15)");
+        fontTitle.setFont(FONT_UI_B);
+        fontTitle.setForeground(labelFg());
+        content.add(fontTitle);
+        content.add(Box.createVerticalStrut(10));
+
+        JSlider fontSlider = new JSlider(0, 15, currentFontSize);
+        fontSlider.setOpaque(false);
+        fontSlider.setMajorTickSpacing(5);
+        fontSlider.setMinorTickSpacing(1);
+        fontSlider.setPaintTicks(true);
+        fontSlider.setPaintLabels(true);
+        fontSlider.setForeground(labelFg());
+        fontSlider.addChangeListener(e -> {
+            int newSize = fontSlider.getValue();
+            updateFontSize(newSize);
+        });
+        content.add(fontSlider);
+
+        content.add(Box.createVerticalStrut(20));
+        JLabel themeTitle = new JLabel("Color Theme");
+        themeTitle.setFont(FONT_UI_B);
+        themeTitle.setForeground(labelFg());
+        content.add(themeTitle);
+        content.add(Box.createVerticalStrut(10));
+
+        String[] themes = {"Blue Theme", "Pink Theme", "Violet Theme", "Red Theme"};
+        JComboBox<String> themeBox = new JComboBox<>(themes);
+        themeBox.setSelectedItem(currentTheme.toString().charAt(0) + currentTheme.toString().substring(1).toLowerCase() + " Theme");
+        themeBox.addActionListener(e -> {
+            String selected = (String) themeBox.getSelectedItem();
+            if (selected.contains("Pink")) currentTheme = Theme.PINK;
+            else if (selected.contains("Violet")) currentTheme = Theme.VIOLET;
+            else if (selected.contains("Red")) currentTheme = Theme.RED;
+            else currentTheme = Theme.BLUE;
+            applyTheme();
+        });
+        content.add(themeBox);
+
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         actions.setBackground(bgLight());
         JButton applyBtn = new JButton("Apply");
@@ -1849,12 +1946,64 @@ public class MainGUI2 extends JFrame {
         actions.add(applyBtn);
         actions.add(closeBtn);
 
-        dialog.add(content, BorderLayout.CENTER);
+        // Wrap the content in a ScrollPane so we can slide up and down
+        JScrollPane scrollPane = new JScrollPane(content);
+        scrollPane.setBorder(null);
+        scrollPane.getViewport().setBackground(bg());
+        scrollPane.getVerticalScrollBar().setUnitIncrement(14); // Smoother sliding
+        styleScrollBar(scrollPane.getVerticalScrollBar());
+
+        dialog.add(scrollPane, BorderLayout.CENTER);
         dialog.add(actions, BorderLayout.SOUTH);
         dialog.pack();
-        dialog.setSize(300, 400);
+        dialog.setSize(320, 450);
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
+    }
+
+    private void applyTheme() {
+        String savedCode = codeEditor != null ? codeEditor.getText() : "";
+        buildUI();
+        if (codeEditor != null && !savedCode.isEmpty()) {
+            codeEditor.setText(savedCode);
+            updateFontSize(currentFontSize);
+        }
+    }
+
+    private void updateFontSize(int size) {
+        // Ensure text remains visible even if 0 is selected
+        int effectiveSize = Math.max(size, 1);
+        currentFontSize = effectiveSize;
+
+        Font newMono = FONT_MONO.deriveFont((float) effectiveSize);
+        Font newMonoSm = FONT_MONO_SM.deriveFont((float) Math.max(effectiveSize - 2, 1));
+
+        if (codeEditor != null) {
+            codeEditor.setFont(newMono);
+            applySyntaxHighlighting();
+            
+            // Update Line Numbers by finding the scroll pane
+            if (codeEditor.getParent() != null && codeEditor.getParent().getParent() instanceof JScrollPane) {
+                JScrollPane sp = (JScrollPane) codeEditor.getParent().getParent();
+                if (sp.getRowHeader() != null && sp.getRowHeader().getView() != null) {
+                    Component lnc = sp.getRowHeader().getView();
+                    lnc.setFont(newMono);
+                    lnc.revalidate();
+                    lnc.repaint();
+                }
+            }
+        }
+
+        if (consolePane != null) consolePane.setFont(newMonoSm);
+        if (runtimeArea != null) runtimeArea.setFont(newMonoSm);
+        if (astTree != null) astTree.setFont(newMonoSm);
+        if (errorList != null) errorList.setFont(newMonoSm);
+        if (warningList != null) warningList.setFont(newMonoSm);
+        
+        if (generatedCodeTable != null) {
+            generatedCodeTable.setFont(newMonoSm);
+            generatedCodeTable.setRowHeight(effectiveSize + 10);
+        }
     }
 
     private JCheckBox createSettingsCheckbox(String text, boolean selected, java.awt.event.ActionListener al) {
