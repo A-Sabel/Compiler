@@ -13,7 +13,7 @@ public class ErrorHandler {
 
     // Called by the Lexer when it hits the Trap State or an unterminated string
     public static void report(String message, int line, int col) {
-        String formattedError = String.format("[Line %d, Col %d] Error: %s", line, col, message);
+        String formattedError = String.format("[Line %d, Col %d] %s", line, col, message);
         errorLog.add(formattedError);
         // Note: Printing is handled by CompilerPipeline, not here
     }
